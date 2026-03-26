@@ -3,7 +3,7 @@
 Step 03：冗余特征处理（相关性阈值）。
 
 读取：
-- output/cluster_prep/02_features_scaled.csv
+- output/cluster_prep/02c_features_std_equalized.csv
 
 做法：
 - 计算 Spearman 相关矩阵
@@ -24,7 +24,7 @@ import pandas as pd
 
 
 ROOT = Path(__file__).resolve().parents[2]
-IN_PATH = ROOT / "output" / "cluster_prep" / "02_features_scaled.csv"
+IN_PATH = ROOT / "output" / "cluster_prep" / "02c_features_std_equalized.csv"
 OUT_DIR = ROOT / "output" / "cluster_prep"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 OUT_PATH = OUT_DIR / "03_features_pruned.csv"
@@ -48,7 +48,7 @@ def _prefer_drop(a: str, b: str) -> str:
 
 def main() -> None:
     if not IN_PATH.exists():
-        raise FileNotFoundError(f"未找到输入：{IN_PATH}，请先运行 02_robustify_scale.py")
+        raise FileNotFoundError(f"未找到输入：{IN_PATH}，请先运行 02c_equalize_variance.py")
 
     df = pd.read_csv(IN_PATH, encoding="utf-8-sig", low_memory=False)
     key_cols = [c for c in ["XH", "TERM_KEY"] if c in df.columns]

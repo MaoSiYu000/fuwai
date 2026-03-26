@@ -10,6 +10,7 @@ Step 05：PCA 检查（只用于诊断，不替代可解释特征）。
 
 输出：
 - output/cluster_prep/05_pca_explained_variance.csv
+- output/cluster_prep/05_pca_top_loadings.csv（PC1/PC2 主要由哪些特征主导）
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ IN_PATH = ROOT / "output" / "cluster_prep" / "03_features_pruned.csv"
 OUT_DIR = ROOT / "output" / "cluster_prep"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 OUT_PATH = OUT_DIR / "05_pca_explained_variance.csv"
+LOAD_PATH = OUT_DIR / "05_pca_top_loadings.csv"
 
 
 def main() -> None:
@@ -53,7 +55,29 @@ def main() -> None:
         }
     )
     out.to_csv(OUT_PATH, index=False, encoding="utf-8-sig")
+
+    # 哪些特征主导 PC1/PC2（用 |loading| 排序，直观）
+    comps = pca.components_  # (n_components, n_features)
+    rows = []
+    for k in [0, 1]:
+        if k >= comps.shape[0]:
+            continue
+        pc_name = f"PC{k+1}"
+        s = pd.Series(comps[k], index=feat_cols)
+        top = s.abs().sort_values(ascending=False).head(20)
+        for feat, abs_loading in top.items():
+            rows.append(
+                {
+                    "component": pc_name,
+                    "feature": feat,
+                    "loading": float(s.loc[feat]),
+                    "abs_loading": float(abs_loading),
+                }
+            )
+    pd.DataFrame(rows).to_csv(LOAD_PATH, index=False, encoding="utf-8-sig")
+
     print(f"[完成] PCA检查：{OUT_PATH}")
+    print(f"[完成] PCA主导来源：{LOAD_PATH}")
 
 
 if __name__ == "__main__":

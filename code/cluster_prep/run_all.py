@@ -22,6 +22,8 @@ SCRIPTS = [
     "00_freeze_input.py",
     "01_missing_indicators_and_impute.py",
     "02_robustify_scale.py",
+    "02b_drop_low_variance.py",
+    "02c_equalize_variance.py",
     "03_drop_redundant.py",
     "04_flag_outliers.py",
     "05_pca_check.py",
