@@ -1,0 +1,14 @@
+# 大文件/派生产物不入库（避免仓库膨胀）
+data/
+output/
+
+# Python 缓存
+__pycache__/
+*.pyc
+
+# Notebook
+.ipynb_checkpoints/
+
+# 系统文件
+.DS_Store
+
