@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>学生行为画像系统 · 风险预警</title>
+  <link rel="stylesheet" href="css/style.css"/>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5/papaparse.min.js"></script>
+</head>
+<body>
+<nav class="nav">
+  <a class="nav-brand" href="overview.html"><em>学生行为</em>画像系统</a>
+  <div class="nav-links">
+    <a class="nav-link" href="overview.html">总览</a>
+      <a class="nav-link" href="mode.html">模式分析</a>
+    <a class="nav-link" href="trend.html">趋势分析</a>
+    <a class="nav-link" href="risk.html">风险预警</a>
+  </div>
+</nav>
+
+<div class="page"><div class="container">
+
+  <div id="app-error" hidden style="padding:20px;background:#FEF2F2;border:1px solid #FCA5A5;border-radius:12px;color:#DC2626;margin-bottom:20px;">
+    ⚠️ 请通过 HTTP 服务器访问
+  </div>
+
+  <div class="filter-bar">
+    <span class="f-label">聚合维度</span>
+    <div class="tabs" id="level-tabs">
+      <button class="tab active" onclick="setLevel('college',this)">学院</button>
+      <button class="tab" onclick="setLevel('major',this)">专业</button>
+      <button class="tab" onclick="setLevel('class',this)">班级</button>
+    </div>
+    <span class="f-label">学期</span>
+    <select id="sel-term" onchange="renderTable(); renderScatter();"></select>
+    <input id="search-input" placeholder="搜索群体名称..." oninput="renderTable()" style="width:180px"/>
+  </div>
+
+  <div id="loading" class="loading"><div class="spinner"></div><div>加载中...</div></div>
+  <div id="risk-content" style="display:none" class="panel-root">
+
+    <!-- 统计汇总 -->
+    <div class="stats-row panel-top" style="grid-template-columns:repeat(3,1fr);margin-bottom:0;" id="risk-stats"></div>
+
+    <!-- 四栏面板：左=排行榜  中=散点（占两栏） 右=AI对话 -->
+    <div class="panel-center">
+      <div class="board4">
+        <!-- 左：排行榜（固定显示，表格内部滚动） -->
+        <div class="center-card board-left">
+          <div class="card-hd" style="display:block;">
+            <div class="flex-between">
+              <span class="card-title">风险排行榜</span>
+              <span id="tbl-count" style="font-size:12px;color:var(--text-3)"></span>
+            </div>
+            <div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+              <span class="f-label">排序</span>
+              <select id="sort-sel" onchange="renderTable()">
+                <option value="risk_desc">风险率 ↓</option>
+                <option value="academic_asc">成绩 ↑</option>
+                <option value="fail_desc">挂科率 ↓</option>
+                <option value="risk_asc">风险率 ↑</option>
+              </select>
+            </div>
+          </div>
+          <div class="card-bd" style="padding:0; min-height:0; height:100%;">
+            <div class="tbl-wrap" style="max-height: calc(100vh - var(--nav-h) - 260px);">
+              <table>
+                <thead><tr>
+                  <th>群体名称</th>
+                  <th>查看详情</th>
+                </tr></thead>
+                <tbody id="risk-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- 中：散点（占两列） -->
+        <div class="center-card board-mid">
+          <div class="card-hd">
+            <span class="card-title">成绩均值 vs 高风险比例（散点）</span>
+          </div>
+          <div class="card-bd" style="flex:1;min-height:0;">
+            <div id="risk-scatter" class="chart-fill"></div>
+          </div>
+        </div>
+
+        <!-- 右：AI对话 -->
+        <div class="center-card board-right">
+          <div class="card-hd">
+            <span class="card-title">AI 分析</span>
+          </div>
+          <div class="card-bd chat">
+            <div class="chat-log" id="chat-log">
+              <div class="chat-msg">
+                <span class="chat-role ai">AI</span>
+                <span>你可以提问风险结构、可能原因与干预建议。我会把当前筛选口径、排行榜摘要、散点分布摘要作为上下文发送到后端。</span>
+              </div>
+            </div>
+            <div class="chat-input">
+              <textarea id="chat-q" placeholder="例如：这些高风险群体的共性是什么？优先干预哪些？"></textarea>
+              <button class="btn btn-primary" id="chat-send" onclick="chatSend()">发送</button>
+            </div>
+            <div style="font-size:12px;color:var(--text-3);margin-top:8px;">
+              说明：此处默认请求后端接口 <code>/api/ai</code>（需你们后续接入大模型代理）。
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div></div>
+
+<!-- 详情弹窗 -->
+<div class="overlay" id="modal-detail">
+  <div class="modal">
+    <div class="modal-hd">
+      <div><h2 id="det-name">—</h2><div id="det-meta" style="font-size:13px;color:var(--text-2);margin-top:3px;"></div></div>
+      <button class="modal-close">✕</button>
+    </div>
+    <div class="modal-bd">
+      <div class="kpi-row" id="det-kpi" style="margin-bottom:18px;"></div>
+      <div class="card-title" style="margin-bottom:10px;">各模式占比</div>
+      <div id="det-mode-bars"></div>
+      <hr/>
+      <div class="card-title" style="margin-bottom:10px;">六维度偏离</div>
+      <div id="det-dims"></div>
+      <hr/>
+      <a id="det-link" href="#" class="btn btn-primary btn-sm" style="text-decoration:none">在群体画像页查看完整分析 →</a>
+    </div>
+  </div>
+</div>
+
+<script src="js/common.js"></script>
+<script>
+let state = { lv:'college', term:'', sortKey:'risk', sortDir:'desc' };
+let allRows = [];
+let charts = {};
+
+document.addEventListener('appReady', ()=>{
+  document.getElementById('loading').style.display='none';
+  document.getElementById('risk-content').style.display='';
+  populateTerm();
+  renderTable();
+  renderScatter();
+});
+
+function getRows(lv){ return lv==='college'?AppData.college:lv==='major'?AppData.major:AppData.clazz; }
+function groupKey(lv){ return lv==='college'?'XSM':lv==='major'?'ZYM':'CLASS_NAME'; }
+
+function setLevel(lv, btn) {
+  state.lv=lv;
+  document.querySelectorAll('#level-tabs .tab').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  populateTerm(); renderTable(); renderScatter();
+}
+
+function populateTerm() {
+  const rows  = getRows(state.lv);
+  const terms = [...new Set(rows.map(r=>r.TERM_KEY))].sort();
+  const sel   = document.getElementById('sel-term');
+  sel.innerHTML = `<option value="">全部学期</option>`+terms.map(t=>`<option>${t}</option>`).join('');
+}
+
+function buildTableData() {
+  const key  = groupKey(state.lv);
+  const term = document.getElementById('sel-term').value;
+  const rows = getRows(state.lv).filter(r=>!term||r.TERM_KEY===term);
+  const groups = {};
+  rows.forEach(r => {
+    const g = r[key]; if(!g) return;
+    if (!groups[g]) groups[g] = [];
+    groups[g].push(r);
+  });
+  return Object.entries(groups).map(([name, rs]) => {
+    const agg = aggregateGroup(rs, name);
+    return agg;
+  });
+}
+
+function aggregateGroup(rows, name) {
+  const numKeys = Object.keys(rows[0]).filter(k=>!['XSM','ZYM','CLASS_NAME','TERM_KEY','dominant_mode_id','dominant_mode_name'].includes(k));
+  const agg = { _name: name };
+  numKeys.forEach(k=>{
+    const vals = rows.map(r=>parseFloat(r[k])).filter(v=>!isNaN(v));
+    agg[k] = vals.length?vals.reduce((a,b)=>a+b,0)/vals.length:null;
+  });
+  agg.n_records = rows.reduce((a,r)=>a+(parseInt(r.n_records)||0),0);
+  let maxPct=0,domId=0;
+  for(let i=0;i<8;i++){ const p=parseFloat(agg[`mode_${i}_pct`])||0; if(p>maxPct){maxPct=p;domId=i;} }
+  agg.dominant_mode_id=domId;
+  agg.dominant_mode_name=AppData.modes[domId]?.name||'—';
+  agg._risk = modeRiskPct(agg);
+  return agg;
+}
+
+function renderTable() {
+  let data = buildTableData();
+  allRows = data;
+  const search = document.getElementById('search-input').value.toLowerCase();
+  if (search) data = data.filter(r=>r._name.toLowerCase().includes(search));
+  // sort
+  const sortSel = document.getElementById('sort-sel').value;
+  if (sortSel==='risk_desc') data.sort((a,b)=>b._risk-a._risk);
+  else if (sortSel==='risk_asc') data.sort((a,b)=>a._risk-b._risk);
+  else if (sortSel==='academic_asc') data.sort((a,b)=>(a.kccj_mean_avg||99)-(b.kccj_mean_avg||99));
+  else if (sortSel==='fail_desc') data.sort((a,b)=>(b.kccj_fail_rate_avg||0)-(a.kccj_fail_rate_avg||0));
+
+  document.getElementById('tbl-count').textContent = `共 ${data.length} 个群体`;
+  renderStats(data);
+
+  const tbody = document.getElementById('risk-tbody');
+  if (!data.length) { tbody.innerHTML='<tr><td colspan="2"><div class="empty">暂无数据</div></td></tr>'; return; }
+  tbody.innerHTML = data.slice(0,100).map(row=>{
+    return `<tr>
+      <td style="font-weight:600">${row._name}</td>
+      <td><button class="btn btn-outline btn-sm" onclick='showDetail(${JSON.stringify(row).replace(/'/g,"&#39;")})'>查看</button></td>
+    </tr>`;
+  }).join('');
+}
+
+function renderStats(data) {
+  const highRisk = data.filter(r=>r._risk>0.3).length;
+  const warn     = data.filter(r=>r._risk>0.15&&r._risk<=0.3).length;
+  const ok       = data.filter(r=>r._risk<=0.15).length;
+  document.getElementById('risk-stats').innerHTML = `
+    <div class="stat danger compact"><div class="stat-label">高风险群体</div><div class="stat-val">${highRisk}<small>个</small></div><div class="stat-sub">风险率 > 30%</div></div>
+    <div class="stat compact" style="--stat-c:#D97706"><div class="stat-label">需关注群体</div><div class="stat-val" style="color:#D97706">${warn}<small>个</small></div><div class="stat-sub">风险率 15%–30%</div></div>
+    <div class="stat success compact"><div class="stat-label">良好群体</div><div class="stat-val">${ok}<small>个</small></div><div class="stat-sub">风险率 ≤ 15%</div></div>
+  `;
+}
+
+function renderScatter() {
+  if (!charts.scatter) charts.scatter = echarts.init(document.getElementById('risk-scatter'));
+  const data = allRows.length ? allRows : buildTableData();
+  const points = data.map(r=>({
+    name: r._name,
+    value: [+(parseFloat(r.kccj_mean_avg)||0).toFixed(1), +(r._risk*100).toFixed(1)],
+    _row: r,
+    itemStyle:{ color: r._risk>0.3?'#EF4444':r._risk>0.15?'#F59E0B':'#10B981' }
+  }));
+
+  // 让点不要贴在坐标轴边界：根据数据自动加一点 padding
+  const xs = points.map(p=>p.value[0]).filter(v=>Number.isFinite(v));
+  const ys = points.map(p=>p.value[1]).filter(v=>Number.isFinite(v));
+  const xMin = xs.length ? Math.min(...xs) : 0;
+  const xMax = xs.length ? Math.max(...xs) : 100;
+  const yMin = ys.length ? Math.min(...ys) : 0;
+  const yMax = ys.length ? Math.max(...ys) : 100;
+  const xPad = Math.max(1, (xMax - xMin) * 0.05);
+  const yPad = Math.max(1, (yMax - yMin) * 0.05);
+
+  charts.scatter.setOption({
+    tooltip:{ trigger:'item', formatter: p=>`${p.name}<br/>成绩均值：${p.value[0]}分<br/>高风险比：${p.value[1]}%` },
+    grid:{ left:50, right:14, top:24, bottom:40, containLabel:false },
+    xAxis:{ type:'value', name:'成绩均值', min: Math.max(0, xMin - xPad), max: xMax + xPad, axisLabel:{fontSize:11} },
+    yAxis:{ type:'value', name:'高风险%', min: Math.max(0, yMin - yPad), max: yMax + yPad, axisLabel:{fontSize:11} },
+    series:[{ type:'scatter', data:points, symbolSize:10 }]
+  });
+  charts.scatter.on('click', p=>{
+    if(p.data?._row) showDetail(p.data._row);
+  });
+}
+
+window.chatSend = async function(){
+  const qEl = document.getElementById('chat-q');
+  const q = (qEl.value||'').trim();
+  if (!q) return;
+  qEl.value = '';
+  const log = document.getElementById('chat-log');
+  const append = (role, text) => {
+    const div = document.createElement('div');
+    div.className = 'chat-msg';
+    div.innerHTML = `<span class="chat-role ${role==='user'?'user':'ai'}">${role==='user'?'你':'AI'}</span><span></span>`;
+    div.querySelector('span:last-child').textContent = text;
+    log.appendChild(div);
+    log.scrollTop = log.scrollHeight;
+    return div;
+  };
+  append('user', q);
+  const aiDiv = append('ai', '思考中…');
+
+  const term = document.getElementById('sel-term').value || '';
+  const sortSel = document.getElementById('sort-sel').value || '';
+  const search = (document.getElementById('search-input').value || '').trim();
+  const top = (allRows || []).slice(0, 30).map(r=>({
+    name: r._name,
+    n_records: r.n_records,
+    risk_pct: r._risk,
+    kccj_mean_avg: r.kccj_mean_avg,
+    kccj_fail_rate_avg: r.kccj_fail_rate_avg,
+    att_present_rate_avg: r.att_present_rate_avg,
+    dominant_mode_name: r.dominant_mode_name
+  }));
+  const payload = {
+    task: 'risk_chat',
+    context: { lv: state.lv, term, sort: sortSel, search },
+    leaderboard_top: top,
+    message: q
+  };
+
+  const btn = document.getElementById('chat-send');
+  btn.disabled = true;
+  try{
+    const res = await fetch('/api/ai', {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const text = await res.text();
+    if (!res.ok) throw new Error(text || `${res.status} ${res.statusText}`);
+    aiDiv.querySelector('span:last-child').textContent = text;
+  }catch(e){
+    aiDiv.querySelector('span:last-child').textContent =
+      `AI 后端尚未接入或请求失败：${String(e?.message||e)}\n（后续把 /api/ai 接到你们的大模型代理即可）`;
+  }finally{
+    btn.disabled = false;
+  }
+};
+
+window.showDetail = function(row) {
+  if (typeof row==='string') row=JSON.parse(row);
+  document.getElementById('det-name').textContent = row._name;
+  const { lv:lvl } = riskLevel(row);
+  document.getElementById('det-meta').textContent = `风险等级：${lvl} · 记录数：${row.n_records}`;
+  // KPI
+  document.getElementById('det-kpi').innerHTML = [
+    {l:'成绩均值',v:fmt.num(row.kccj_mean_avg)+'分'},
+    {l:'挂科率',v:fmt.pct(row.kccj_fail_rate_avg)},
+    {l:'出勤率',v:fmt.pct(row.att_present_rate_avg)},
+    {l:'高风险比',v:(row._risk*100).toFixed(1)+'%'},
+  ].map(i=>`<div class="kpi"><div class="kpi-label">${i.l}</div><div class="kpi-val">${i.v}</div></div>`).join('');
+  // mode bars
+  const mb = AppData.modes.map(m=>{
+    const pct=(parseFloat(row[`mode_${m.mode_id}_pct`])||0)*100;
+    return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:7px;">
+      <div style="width:88px;font-size:11px;color:var(--text-2);text-align:right;">${m.name}</div>
+      <div style="flex:1;height:14px;background:var(--bg);border-radius:7px;overflow:hidden;">
+        <div style="height:100%;width:${pct.toFixed(1)}%;background:${MODE_COLORS[m.mode_id]};border-radius:7px;"></div>
+      </div>
+      <div style="width:38px;font-size:11px;font-weight:600;color:${MODE_COLORS[m.mode_id]}">${pct.toFixed(1)}%</div>
+    </div>`;
+  }).join('');
+  document.getElementById('det-mode-bars').innerHTML = mb;
+  // dims
+  renderDimBars(document.getElementById('det-dims'), {
+    dim_academic:row.dim_academic_mean, dim_attendance_engagement:row.dim_attendance_engagement_mean,
+    dim_homework_behavior:row.dim_homework_behavior_mean, dim_online_learning:row.dim_online_learning_mean,
+    dim_fitness:row.dim_fitness_mean, dim_development:row.dim_development_mean
+  }, 1.5);
+  // link
+  const term = document.getElementById('sel-term').value || '';
+  const lv = state.lv || 'college';
+  const group = row._name || '';
+  const hash = `#group&lv=${encodeURIComponent(lv)}&group=${encodeURIComponent(group)}&term=${encodeURIComponent(term)}`;
+  document.getElementById('det-link').href = `overview.html${hash}`;
+  openModal('modal-detail');
+};
+
+window.addEventListener('resize', ()=>charts.scatter?.resize());
+</script>
+</body>
+</html>

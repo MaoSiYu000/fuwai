@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" /><meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>学生行为画像系统 · 总览</title>
+  <link rel="stylesheet" href="css/style.css"/>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5/papaparse.min.js"></script>
+</head>
+<body>
+
+<!-- NAV -->
+<nav class="nav">
+  <a class="nav-brand" href="overview.html"><em>学生行为</em>画像系统</a>
+  <div class="nav-links">
+    <a class="nav-link" href="overview.html">总览</a>
+      <a class="nav-link" href="mode.html">模式分析</a>
+    <a class="nav-link" href="trend.html">趋势分析</a>
+    <a class="nav-link" href="risk.html">风险预警</a>
+  </div>
+</nav>
+
+<div class="page">
+  <div class="container">
+
+    <!-- 合并页：总体/群体切换 + 群体筛选条（群体模式显示） -->
+    <div class="filter-bar" id="dash-bar" style="display:none; margin-bottom:14px;">
+      <span class="f-label">视角</span>
+      <div class="tabs" id="scope-tabs">
+        <button class="tab active" data-scope="overall" onclick="setScope('overall',this)">总体</button>
+        <button class="tab" data-scope="group" onclick="setScope('group',this)">群体</button>
+      </div>
+      <span class="f-label" id="group-controls-label" style="margin-left:10px; display:none;">群体筛选</span>
+      <div id="group-controls" style="display:none; align-items:center; gap:10px; flex-wrap:wrap;">
+        <div class="tabs" id="level-tabs" style="margin:0;">
+          <button class="tab active" data-lv="college" onclick="setLevel('college',this)">学院</button>
+          <button class="tab" data-lv="major" onclick="setLevel('major',this)">专业</button>
+          <button class="tab" data-lv="class" onclick="setLevel('class',this)">班级</button>
+        </div>
+        <select id="sel-group" onchange="onGroupChange()"></select>
+        <select id="sel-term" onchange="onTermChange()"></select>
+      </div>
+    </div>
+
+    <!-- 错误提示 -->
+    <div id="app-error" hidden style="padding:20px;background:#FEF2F2;border:1px solid #FCA5A5;border-radius:12px;color:#DC2626;margin-bottom:20px;">
+      ⚠️ 数据加载失败，请通过 HTTP 服务器打开（如 <code>python -m http.server 8080</code>），而非直接双击文件。
+    </div>
+
+    <!-- 加载中 -->
+    <div id="loading" class="loading">
+      <div class="spinner"></div>
+      <div>正在加载数据...</div>
+    </div>
+
+    <!-- 主内容 -->
+    <div id="main-content" style="display:none" class="panel-root">
+
+      <!-- 四栏面板：左=模式详情（随点击变化） 中=主图（占两栏，可切换） 右=AI对话 -->
+      <div class="panel-center">
+        <div class="board4">
+          <!-- 左侧：模式详情 -->
+          <div class="center-card board-left">
+            <div class="card-hd">
+              <span class="card-title">模式详情</span>
+            </div>
+            <div class="card-bd panel-scroll">
+              <!-- 左侧顶部：高风险/优秀汇总（总体口径） -->
+              <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:10px;">
+                <div class="kpi" style="background:var(--bg); padding:12px;">
+                  <div class="kpi-label">高风险学生比例</div>
+                  <div class="kpi-val bad" id="stat-risk">—</div>
+                  <div class="kpi-label" style="margin-top:4px; line-height:1.3;">高风险波动<br/>学业薄弱</div>
+                </div>
+                <div class="kpi" style="background:var(--bg); padding:12px;">
+                  <div class="kpi-label">优秀学生比例</div>
+                  <div class="kpi-val good" id="stat-good">—</div>
+                  <div class="kpi-label" style="margin-top:4px; line-height:1.3;">学业优势<br/>发展成就突出</div>
+                </div>
+              </div>
+              <hr/>
+              <div class="mode-title" id="left-mode-title">—</div>
+              <div class="mode-desc" id="left-mode-desc">点击中间分布图的扇形块，左侧会显示对应模式画像。</div>
+              <hr/>
+              <div class="card-title" style="margin-bottom:10px;">六维度画像（相对全体均值）</div>
+              <div id="left-dims"></div>
+              <hr/>
+              <div class="kv"><div class="k">占总体比例</div><div class="v" id="left-pct">—</div></div>
+              <div class="kv"><div class="k">学期记录数</div><div class="v" id="left-size">—</div></div>
+            </div>
+          </div>
+
+          <!-- 中间：主图 -->
+          <div class="center-card board-mid">
+            <div class="card-hd">
+              <span class="card-title" id="center-title">共 20,014 条行为模式分析</span>
+            </div>
+            <div class="card-bd" style="flex:1;min-height:0;">
+              <div id="center-dist" class="chart-fill"></div>
+            </div>
+          </div>
+
+          <!-- 右侧：上=画像（1/4） 下=AI 对话（3/4） -->
+          <div class="center-card board-right">
+            <div style="display:flex; flex-direction:column; min-height:0; height:100%;">
+              <div id="right-radar-wrap" style="flex:0 0 280px; min-height:0; display:flex; flex-direction:column;">
+                <div class="card-hd">
+                  <span class="card-title">画像</span>
+                </div>
+                <div class="card-bd" style="flex:1;min-height:0; padding-top:10px; padding-bottom:10px;">
+                  <div id="center-radar" style="height:100%; min-height:0;"></div>
+                </div>
+              </div>
+              <div id="right-ai-wrap" style="flex:1; min-height:0; border-top:1px solid var(--border); display:flex; flex-direction:column;">
+                <div class="card-hd">
+                  <span class="card-title">AI 分析</span>
+                </div>
+                <div class="card-bd chat" style="padding-top:10px;">
+                  <div class="chat-log" id="chat-log">
+                    <div class="chat-msg">
+                      <span class="chat-role ai">AI</span>
+                      <span>选择一个模式后，你可以直接提问（这里会把该模式的六维度画像、占比、描述作为上下文传给后端）。</span>
+                    </div>
+                  </div>
+                  <div class="chat-input">
+                    <textarea id="chat-q" placeholder="例如：这个模式的学生可能存在哪些风险？给出3条可执行建议。"></textarea>
+                    <button class="btn btn-primary" id="chat-send" onclick="chatSend()">发送</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /main-content -->
+  </div>
+</div>
+
+<script src="js/common.js"></script>
+<script>
+document.addEventListener('appReady', init);
+
+function init() {
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('main-content').style.display = '';
+
+  const modes = AppData.modes;
+  window.__modes = modes;
+  window.__selectedMode = null;
+  window.__scope = 'overall';
+  window.__groupState = { lv:'college', group:'', term:'', rows:[], agg:null };
+
+  // 顶部切换条
+  document.getElementById('dash-bar').style.display = '';
+
+  // 统计卡
+  const risk = modes.filter(m=>[1,6].includes(m.mode_id)).reduce((a,m)=>a+m.pct,0);
+  const good = modes.filter(m=>[2,3].includes(m.mode_id)).reduce((a,m)=>a+m.pct,0);
+  document.getElementById('stat-risk').textContent = (risk*100).toFixed(1)+'%';
+  document.getElementById('stat-good').textContent = (good*100).toFixed(1)+'%';
+
+  renderDonut(modes);
+  renderRadar(modes);
+
+  // 默认选中占比最大的模式
+  const top = [...modes].sort((a,b)=>b.pct-a.pct)[0];
+  if (top) selectMode(top);
+
+  updateCenterTitle();
+
+  // 支持从其它页面深链接到群体视角：
+  // 形如 overview.html#group&lv=college&group=xxx&term=2023-2024-1
+  applyDeepLink();
+}
+
+function applyDeepLink(){
+  const raw = (location.hash || '').replace(/^#/, '');
+  if (!raw) return;
+  const lower = raw.toLowerCase();
+  if (!lower.startsWith('group')) return;
+
+  const qs = raw.slice('group'.length).replace(/^\&/, '');
+  const params = new URLSearchParams(qs);
+  const lv = params.get('lv') || '';
+  const group = params.get('group') || '';
+  const term = params.get('term') || '';
+
+  const btn = document.querySelector('#scope-tabs .tab[data-scope="group"]');
+  if (btn) setScope('group', btn);
+
+  // 先设置维度 tab（会触发 populate 与 render）
+  if (lv) {
+    const lvBtn = document.querySelector(`#level-tabs .tab[data-lv="${lv}"]`);
+    if (lvBtn) setLevel(lv, lvBtn);
+  }
+
+  // 再回填下拉框选择（populateXxx 内会尽量保留已有值）
+  if (group) {
+    window.__groupState.group = group;
+    const sel = document.getElementById('sel-group');
+    if (sel) sel.value = group;
+  }
+  if (term) {
+    window.__groupState.term = term;
+    const selT = document.getElementById('sel-term');
+    if (selT) selT.value = term;
+  }
+  renderGroup();
+}
+
+function renderDonut(modes) {
+  const chart = echarts.init(document.getElementById('center-dist'));
+  window.__charts_overview = window.__charts_overview || {};
+  window.__charts_overview.dist = chart;
+  const data  = modes.map((m,i) => ({
+    name: m.name, value: (m.pct*100).toFixed(2),
+    itemStyle: { color: MODE_COLORS[m.mode_id] }
+  }));
+  chart.setOption({
+    tooltip: { trigger:'item', formatter: p => `${p.name}<br/>${p.value}%（${AppData.modes[p.dataIndex]?.size}条）` },
+    legend: { type:'scroll', bottom:0, textStyle:{fontSize:11}, pageIconSize:10 },
+    series: [{
+      type:'pie', radius:['42%','70%'], center:['50%','44%'],
+      data, label:{show:false},
+      emphasis:{ itemStyle:{shadowBlur:8,shadowOffsetX:0,shadowColor:'rgba(0,0,0,0.2)'} }
+    }]
+  });
+  chart.on('click', p => {
+    const m = AppData.modes.find(x=>x.name===p.name);
+    if (m) selectMode(m);
+  });
+  window.addEventListener('resize', ()=>chart.resize());
+}
+
+function renderRadar(modes) {
+  const chart = echarts.init(document.getElementById('center-radar'));
+  window.__charts_overview = window.__charts_overview || {};
+  window.__charts_overview.radar = chart;
+  const indicator = DIM_NAMES.map(n=>({ name:n, max:1.5, min:-1.5 }));
+  chart.setOption({
+    tooltip:{ trigger:'item' },
+    legend:{ show: false },
+    radar: { indicator, radius:'60%', center:['50%','52%'], axisName:{fontSize:11}, splitArea:{areaStyle:{color:['#F8FAFC','#FFF']}} },
+    series: [{ type:'radar', data:[] }]
+  });
+  renderRadarForScope();
+  window.addEventListener('resize', ()=>chart.resize());
+}
+
+function renderRadarForScope(){
+  const chart = window.__charts_overview?.radar;
+  if (!chart) return;
+  const indicator = DIM_NAMES.map(n=>({ name:n, max:1.5, min:-1.5 }));
+  const scope = window.__scope || 'overall';
+  if (scope === 'group' && window.__groupState?.agg) {
+    const a = window.__groupState.agg;
+    const val = DIM_KEYS.map(k=>parseFloat(a[k+'_mean'])||0);
+    chart.setOption({
+      radar: { indicator },
+      legend: { show: false },
+      series: [{ type:'radar', data:[{
+        name: window.__groupState.group || '群体',
+        value: val,
+        lineStyle:{ color:'#3B82F6', width:2.2 },
+        areaStyle:{ opacity:.10, color:'#3B82F6' },
+        itemStyle:{ color:'#3B82F6' }
+      }]}]
+    }, { notMerge: true });
+    return;
+  }
+  // 总体：8个模式六维画像（来自 mode_definitions）
+  const modes = window.__modes || [];
+  const series = modes.map(m => ({
+    name: m.name,
+    value: DIM_KEYS.map(k=>parseFloat(m.dim_profile[k])||0),
+    itemStyle:{ color:MODE_COLORS[m.mode_id] },
+    lineStyle:{ width:1.5, color:MODE_COLORS[m.mode_id] },
+    areaStyle:{ opacity:.05 }
+  }));
+  chart.setOption({
+    radar: { indicator },
+    legend:{ show: false },
+    series: [{ type:'radar', data: series }]
+  }, { notMerge: true });
+}
+
+// 中间区域不再切换“分布/画像”：分布固定在中间，画像固定在右侧。
+
+function selectMode(m){
+  window.__selectedMode = m;
+  const scope = window.__scope || 'overall';
+  document.getElementById('left-mode-title').textContent = `Mode ${m.mode_id} · ${m.name}`;
+  document.getElementById('left-mode-desc').textContent = m.description || '';
+  renderDimBars(document.getElementById('left-dims'), m.dim_profile, 1.5);
+  if (scope === 'group' && window.__groupState?.agg) {
+    const pct = parseFloat(window.__groupState.agg[`mode_${m.mode_id}_pct`]) || 0;
+    const n = window.__groupState.agg.n_records ? Math.round(pct * window.__groupState.agg.n_records) : null;
+    document.getElementById('left-pct').textContent = (pct*100).toFixed(1)+'%';
+    document.getElementById('left-size').textContent = n==null ? '—' : n.toLocaleString()+'条';
+  } else {
+    document.getElementById('left-pct').textContent = (m.pct*100).toFixed(1)+'%';
+    document.getElementById('left-size').textContent = (m.size||0).toLocaleString()+'条';
+  }
+}
+
+// ===== 合并：群体筛选逻辑（复用 profile 的口径） =====
+function getRows(lv) {
+  return lv==='college' ? AppData.college : lv==='major' ? AppData.major : AppData.clazz;
+}
+function groupKey(lv) { return lv==='college'?'XSM': lv==='major'?'ZYM':'CLASS_NAME'; }
+
+window.setScope = function(scope, btn){
+  window.__scope = scope;
+  document.querySelectorAll('#scope-tabs .tab').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+
+  const isGroup = scope==='group';
+  document.getElementById('group-controls').style.display = isGroup ? 'flex' : 'none';
+  document.getElementById('group-controls-label').style.display = isGroup ? '' : 'none';
+  updateCenterTitle();
+
+  if (isGroup) {
+    populateGroupSel();
+    populateTermSel();
+    renderGroup();
+  } else {
+    // 回到总体：饼图使用总体 pct
+    renderDonut(AppData.modes);
+    // 左侧模式详情改回总体口径
+    if (window.__selectedMode) selectMode(window.__selectedMode);
+    updateCenterTitle();
+  }
+  renderRadarForScope();
+};
+
+window.setLevel = function(lv, btn){
+  window.__groupState.lv = lv;
+  document.querySelectorAll('#level-tabs .tab').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  populateGroupSel();
+  populateTermSel();
+  renderGroup();
+};
+window.onGroupChange = function(){
+  window.__groupState.group = document.getElementById('sel-group').value;
+  renderGroup();
+};
+window.onTermChange = function(){
+  window.__groupState.term = document.getElementById('sel-term').value;
+  renderGroup();
+};
+
+function populateGroupSel() {
+  const rows = getRows(window.__groupState.lv);
+  const key  = groupKey(window.__groupState.lv);
+  const groups = [...new Set(rows.map(r=>r[key]).filter(Boolean))].sort();
+  const sel = document.getElementById('sel-group');
+  sel.innerHTML = groups.map(g=>`<option value="${g}">${g}</option>`).join('');
+  const keep = window.__groupState.group;
+  window.__groupState.group = (keep && groups.includes(keep)) ? keep : (groups[0] || '');
+  sel.value = window.__groupState.group;
+}
+function populateTermSel() {
+  const rows  = getRows(window.__groupState.lv);
+  const terms = [...new Set(rows.map(r=>r.TERM_KEY))].sort();
+  const sel   = document.getElementById('sel-term');
+  sel.innerHTML = `<option value="">全部学期</option>` + terms.map(t=>`<option>${t}</option>`).join('');
+  const keep = window.__groupState.term;
+  window.__groupState.term = (keep && terms.includes(keep)) ? keep : '';
+  sel.value = window.__groupState.term;
+}
+function getFilteredRows(group, lv, term) {
+  const rows = getRows(lv);
+  const key  = groupKey(lv);
+  return rows.filter(r => r[key]===group && (!term || r.TERM_KEY===term));
+}
+function aggregateRows(rows) {
+  if (!rows.length) return null;
+  const numKeys = Object.keys(rows[0]).filter(k => !['XSM','ZYM','CLASS_NAME','TERM_KEY','dominant_mode_id','dominant_mode_name'].includes(k));
+  const agg = { ...rows[0] };
+  numKeys.forEach(k => {
+    const vals = rows.map(r=>parseFloat(r[k])).filter(v=>!isNaN(v));
+    agg[k] = vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : null;
+  });
+  agg.n_records = rows.reduce((a,r)=>a+(parseInt(r.n_records)||0),0);
+  return agg;
+}
+function renderGroup(){
+  const g = window.__groupState.group;
+  if (!g) return;
+  const rows = getFilteredRows(g, window.__groupState.lv, window.__groupState.term);
+  const agg = aggregateRows(rows);
+  window.__groupState.rows = rows;
+  window.__groupState.agg = agg;
+  if (!agg) return;
+
+  updateCenterTitle();
+
+  // 用群体口径重画饼图（值来自 mode_i_pct）
+  const chart = echarts.init(document.getElementById('center-dist'));
+  const data = AppData.modes.map(m=>({
+    name: m.name,
+    value: ((parseFloat(agg[`mode_${m.mode_id}_pct`])||0)*100).toFixed(2),
+    itemStyle:{ color: MODE_COLORS[m.mode_id] }
+  }));
+  chart.setOption({
+    tooltip:{ trigger:'item', formatter: p=>`${p.name}<br/>${p.value}%` },
+    legend:{ type:'scroll', bottom:0, textStyle:{fontSize:11}, pageIconSize:10 },
+    series:[{ type:'pie', radius:['42%','70%'], center:['50%','44%'],
+      data, label:{show:false},
+      emphasis:{itemStyle:{shadowBlur:8,shadowColor:'rgba(0,0,0,0.2)'}}
+    }]
+  });
+  chart.off('click');
+  chart.on('click', p=>{
+    const m = AppData.modes.find(x=>x.name===p.name);
+    if (m) selectMode(m);
+  });
+
+  // 左侧若已有选中模式，刷新为群体口径
+  if (window.__selectedMode) selectMode(window.__selectedMode);
+  renderRadarForScope();
+}
+
+function updateCenterTitle(){
+  const scope = window.__scope || 'overall';
+  if (scope === 'group') {
+    const n = window.__groupState?.agg?.n_records;
+    document.getElementById('center-title').textContent = `${n == null ? '—' : n.toLocaleString()} 条群体行为模式分析`;
+    return;
+  }
+  document.getElementById('center-title').textContent = '20,014 条行为模式分析';
+}
+
+window.chatSend = async function(){
+  const qEl = document.getElementById('chat-q');
+  const q = (qEl.value||'').trim();
+  if (!q) return;
+  qEl.value = '';
+  const log = document.getElementById('chat-log');
+  const append = (role, text) => {
+    const div = document.createElement('div');
+    div.className = 'chat-msg';
+    div.innerHTML = `<span class="chat-role ${role==='user'?'user':'ai'}">${role==='user'?'你':'AI'}</span><span></span>`;
+    div.querySelector('span:last-child').textContent = text;
+    log.appendChild(div);
+    log.scrollTop = log.scrollHeight;
+    return div;
+  };
+  append('user', q);
+  const aiDiv = append('ai', '思考中…');
+
+  const payload = {
+    task: 'mode_explain_chat',
+    selected_mode: window.__selectedMode ? {
+      mode_id: window.__selectedMode.mode_id,
+      name: window.__selectedMode.name,
+      description: window.__selectedMode.description,
+      pct: window.__selectedMode.pct,
+      size: window.__selectedMode.size,
+      dim_profile: window.__selectedMode.dim_profile
+    } : null,
+    message: q
+  };
+
+  const btn = document.getElementById('chat-send');
+  btn.disabled = true;
+  try{
+    const res = await fetch('/api/ai', {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const text = await res.text();
+    if (!res.ok) throw new Error(text || `${res.status} ${res.statusText}`);
+    aiDiv.querySelector('span:last-child').textContent = text;
+  }catch(e){
+    aiDiv.querySelector('span:last-child').textContent =
+      `AI 后端尚未接入或请求失败：${String(e?.message||e)}\n（后续把 /api/ai 接到你们的大模型代理即可）`;
+  }finally{
+    btn.disabled = false;
+  }
+};
+</script>
+</body>
+</html>

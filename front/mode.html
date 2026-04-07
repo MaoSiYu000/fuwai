@@ -1,0 +1,931 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>学生行为画像系统 · 模式分析</title>
+  <link rel="stylesheet" href="css/style.css"/>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5/papaparse.min.js"></script>
+</head>
+<body>
+<nav class="nav">
+  <a class="nav-brand" href="overview.html"><em>学生行为</em>画像系统</a>
+  <div class="nav-links">
+    <a class="nav-link" href="overview.html">总览</a>
+    <a class="nav-link" href="mode.html">模式分析</a>
+    <a class="nav-link" href="trend.html">趋势分析</a>
+    <a class="nav-link" href="risk.html">风险预警</a>
+  </div>
+</nav>
+
+<div class="page"><div class="container">
+  <div id="app-error" hidden style="padding:20px;background:#FEF2F2;border:1px solid #FCA5A5;border-radius:12px;color:#DC2626;margin-bottom:20px;">
+    ⚠️ 数据加载失败，请通过 HTTP 服务器打开（如 <code>python -m http.server 8080</code>）。
+  </div>
+
+  <div class="panel-root">
+    <div class="panel-top">
+      <div class="filter-bar">
+        <span class="f-label">选择模式</span>
+        <div class="tabs" id="mode-tabs"></div>
+        <span class="f-label" style="margin-left:10px;">学期</span>
+        <select id="sel-term" onchange="renderAll()"></select>
+        <span class="f-label">对比</span>
+        <select id="sel-compare" onchange="renderAll()">
+          <option value="">不对比</option>
+          <option value="overall">对比全体</option>
+        </select>
+        <span style="margin-left:auto;font-size:12px;color:var(--text-3)" id="mode-sub">—</span>
+      </div>
+    </div>
+
+    <div class="panel-center">
+      <div id="loading" class="loading"><div class="spinner"></div><div>加载中...</div></div>
+      <div id="mode-content" style="display:none; height:100%; min-height:0;">
+        <div class="board4" style="height:100%; min-height:0;">
+          <!-- 左 1/4：迁移 +（子类 + 来源Top切换） -->
+          <div class="board-left vstack">
+            <div class="card" style="flex:1; min-height:0; display:flex; flex-direction:column;">
+              <div class="card-hd flex-between">
+                <span class="card-title">模式迁移</span>
+                <span style="font-size:12px;color:var(--text-3)">相邻学期配对</span>
+              </div>
+              <div class="card-bd" style="min-height:0; flex:1; display:flex; flex-direction:column;">
+                <div class="tr-chart-wrap">
+                  <div id="tr-hover-label" class="tr-hover-label" role="status"></div>
+                  <div id="chart-transition" class="chart-fill tr-chart-canvas"></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="card" style="flex:1; min-height:0; display:flex; flex-direction:column;">
+              <div class="card-hd flex-between">
+                <div class="tabs" style="padding:2px; gap:2px;">
+                  <button class="tab active" id="btn-view-subtype" onclick="setSubtypeView('subtype_only', this)">仅子类</button>
+                  <button class="tab" id="btn-view-source" onclick="setSubtypeView('source_both', this)">学院+专业</button>
+                </div>
+                <button type="button" class="btn btn-outline btn-sm" id="btn-source-detail" onclick="openSourceDetailModal()" style="display:none;">查看详情</button>
+              </div>
+              <div class="card-bd" style="min-height:0; flex:1; display:flex; flex-direction:column;">
+                <div id="subtype-section" style="flex:1; min-height:0; display:flex; flex-direction:column;">
+                  <div style="font-size:12px;color:var(--text-2);margin-bottom:6px;">子类 subtype 构成（当前学期）</div>
+                  <div id="chart-subtype" class="chart-fill" style="min-height:0;"></div>
+                </div>
+                <div id="source-section" style="flex:1; min-height:0; display:none; flex-direction:column; gap:8px;">
+                  <div style="flex:1; min-height:0; display:flex; flex-direction:column; min-height:0;">
+                    <div style="font-size:12px;color:var(--text-2);margin-bottom:4px;">学院 Top</div>
+                    <div id="chart-top-college" class="chart-fill" style="min-height:0;"></div>
+                  </div>
+                  <div style="flex:1; min-height:0; display:flex; flex-direction:column; min-height:0;">
+                    <div style="font-size:12px;color:var(--text-2);margin-bottom:4px;">专业 Top</div>
+                    <div id="chart-top-major" class="chart-fill" style="min-height:0;"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 中 2/4：上 3/4 六维度均值，下 1/4 模式占比趋势 -->
+          <div class="board-mid vstack">
+            <div class="card" style="flex:3; min-height:0; display:flex; flex-direction:column;">
+              <div class="card-hd flex-between">
+                <span class="card-title" id="mode-title">六维度均值</span>
+                <span style="font-size:12px;color:var(--text-3)" id="mode-title-sub">—</span>
+              </div>
+              <div class="card-bd" style="min-height:0; flex:1;">
+                <div id="chart-dim-trend" class="chart-fill"></div>
+              </div>
+            </div>
+            <div class="card" style="flex:1; min-height:0; display:flex; flex-direction:column;">
+              <div class="card-hd flex-between">
+                <span class="card-title">该模式占比随学期变化</span>
+                <span style="font-size:12px;color:var(--text-3)">按学生-学期聚合</span>
+              </div>
+              <div class="card-bd" style="min-height:0; flex:1;">
+                <div id="chart-mode-share" class="chart-fill"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 右 1/4：雷达 / 箱线 切换 + AI -->
+          <div class="board-right vstack">
+            <div class="card" style="flex:1; min-height:0; display:flex; flex-direction:column;">
+              <div class="card-hd flex-between">
+                <span class="card-title" id="right-dim-card-title">六维度 · 箱线图</span>
+                <div class="tabs" style="padding:2px; gap:2px;">
+                  <button class="tab" id="btn-dim-radar" onclick="setRightDimView('radar', this)">雷达</button>
+                  <button class="tab active" id="btn-dim-box" onclick="setRightDimView('box', this)">箱线</button>
+                </div>
+              </div>
+              <div class="card-bd" style="min-height:0; flex:1; display:flex; flex-direction:column;">
+                <div id="wrap-dim-radar" style="flex:1; min-height:0; display:none;">
+                  <div id="chart-dim-radar" class="chart-fill"></div>
+                </div>
+                <div id="wrap-dim-box" style="flex:1; min-height:0; display:flex; flex-direction:column;">
+                  <div id="chart-dim-box" class="chart-fill" style="min-height:0;"></div>
+                </div>
+              </div>
+            </div>
+            <div class="card" style="flex:1; min-height:0; display:flex; flex-direction:column;">
+              <div class="card-hd flex-between">
+                <span class="card-title">AI 问答</span>
+                <button class="btn btn-outline btn-sm" onclick="chatClear()">清空</button>
+              </div>
+              <div class="card-bd" style="min-height:0; flex:1;">
+                <div class="chat">
+                  <div class="chat-log" id="chat-log"></div>
+                  <div class="chat-input">
+                    <textarea id="chat-input" placeholder="例如：请用通俗的话解释该模式的特征，并给出可改进建议。"></textarea>
+                    <button class="btn btn-primary" onclick="chatSend()">发送</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div></div>
+
+<div class="overlay" id="modal-source-detail">
+  <div class="modal modal-source-wide">
+    <div class="modal-hd">
+      <div>
+        <h2>学院 / 专业 分布详情</h2>
+        <div id="source-modal-meta" style="font-size:13px;color:var(--text-2);margin-top:4px;"></div>
+      </div>
+      <button type="button" class="modal-close" aria-label="关闭">✕</button>
+    </div>
+    <div class="modal-bd modal-source-bd">
+      <div class="modal-source-grid">
+        <div class="modal-source-col">
+          <div class="card-title" style="margin-bottom:8px;font-size:13px;">学院（样本数 Top 50）</div>
+          <div id="chart-modal-college" class="modal-source-chart"></div>
+        </div>
+        <div class="modal-source-col">
+          <div class="card-title" style="margin-bottom:8px;font-size:13px;">专业（样本数 Top 50）</div>
+          <div id="chart-modal-major" class="modal-source-chart"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="js/common.js"></script>
+<script>
+let studentRows = [];
+let charts = {};
+let state = { mode: 0, subtypeView: 'subtype_only', rightDimView: 'box' };
+
+function getBase(){ return './'; }
+
+function toNum(v){
+  const x = parseFloat(v);
+  return Number.isFinite(x) ? x : null;
+}
+
+function groupBy(arr, keyFn){
+  const m = new Map();
+  for(const x of arr){
+    const k = keyFn(x);
+    if(!m.has(k)) m.set(k, []);
+    m.get(k).push(x);
+  }
+  return m;
+}
+
+function quantile(sorted, q){
+  if(!sorted.length) return null;
+  const pos = (sorted.length - 1) * q;
+  const base = Math.floor(pos);
+  const rest = pos - base;
+  if(sorted[base+1] === undefined) return sorted[base];
+  return sorted[base] + rest * (sorted[base+1] - sorted[base]);
+}
+
+function buildBox(values){
+  const v = values.filter(x=>x!=null && !isNaN(x)).sort((a,b)=>a-b);
+  if(!v.length) return [0,0,0,0,0];
+  const q1 = quantile(v, 0.25);
+  const q2 = quantile(v, 0.50);
+  const q3 = quantile(v, 0.75);
+  return [v[0], q1, q2, q3, v[v.length-1]];
+}
+
+async function loadStudents(){
+  const base = getBase();
+  return new Promise((res, rej)=>{
+    Papa.parse(base + 'data/student_profiles.csv', {
+      download:true, header:true, skipEmptyLines:true,
+      complete: r => res(r.data),
+      error: e => rej(e)
+    });
+  });
+}
+
+function modeName(id){
+  const m = (AppData.modes||[]).find(x=>Number(x.mode_id)===Number(id));
+  return m ? m.name : `Mode ${id}`;
+}
+
+function subtypeName(modeId, subtypeId){
+  const sid = Number(subtypeId);
+  const mid = Number(modeId);
+  const hit = (AppData.subtypes || []).find(s => Number(s.mode_id)===mid && Number(s.subtype_id)===sid);
+  return hit?.name || `子类 ${subtypeId}`;
+}
+
+function renderModeTabs(){
+  const wrap = document.getElementById('mode-tabs');
+  wrap.innerHTML = Array.from({length:8},(_,i)=>`
+    <button class="tab ${i===state.mode?'active':''}" onclick="setMode(${i}, this)">Mode ${i}</button>
+  `).join('');
+}
+
+window.setMode = function(m, btn){
+  state.mode = m;
+  document.querySelectorAll('#mode-tabs .tab').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  renderAll();
+}
+
+function applySubtypeCardLayout(){
+  const sub = document.getElementById('subtype-section');
+  const src = document.getElementById('source-section');
+  const det = document.getElementById('btn-source-detail');
+  if (!sub || !src) return;
+  if (state.subtypeView === 'subtype_only') {
+    sub.style.display = 'flex';
+    src.style.display = 'none';
+    if (det) det.style.display = 'none';
+  } else {
+    sub.style.display = 'none';
+    src.style.display = 'flex';
+    if (det) det.style.display = '';
+  }
+}
+
+window.setSubtypeView = function(view, btn){
+  state.subtypeView = view;
+  document.querySelectorAll('#btn-view-subtype, #btn-view-source').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  applySubtypeCardLayout();
+  renderAll();
+}
+
+function applyRightDimLayout(){
+  const wr = document.getElementById('wrap-dim-radar');
+  const wb = document.getElementById('wrap-dim-box');
+  const title = document.getElementById('right-dim-card-title');
+  if (!wr || !wb) return;
+  if (state.rightDimView === 'radar') {
+    wr.style.display = 'flex';
+    wr.style.flexDirection = 'column';
+    wb.style.display = 'none';
+    if (title) title.textContent = '六维度 · 雷达';
+  } else {
+    wr.style.display = 'none';
+    wb.style.display = 'flex';
+    wb.style.flexDirection = 'column';
+    if (title) title.textContent = '六维度 · 箱线图';
+  }
+}
+
+window.setRightDimView = function(view, btn){
+  state.rightDimView = view;
+  document.querySelectorAll('#btn-dim-radar, #btn-dim-box').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  applyRightDimLayout();
+  renderAll();
+}
+
+function renderTermSel(){
+  const terms = [...new Set(studentRows.map(r=>r.TERM_KEY).filter(Boolean))].sort();
+  const sel = document.getElementById('sel-term');
+  sel.innerHTML = `<option value="">全部学期</option>` + terms.map(t=>`<option value="${t}">${t}</option>`).join('');
+}
+
+function filterRows(){
+  const term = document.getElementById('sel-term').value;
+  const mode = state.mode;
+  let rows = studentRows.filter(r=>Number(r.mode_id)===Number(mode));
+  if(term) rows = rows.filter(r=>r.TERM_KEY===term);
+  return rows;
+}
+
+function renderKPIs(rows){
+  const kccj = rows.map(r=>toNum(r.kccj_mean)).filter(v=>v!=null);
+  const fail = rows.map(r=>toNum(r.kccj_fail_rate)).filter(v=>v!=null);
+  const att = rows.map(r=>toNum(r.att_present_rate)).filter(v=>v!=null);
+
+  const mean = a => a.length ? a.reduce((x,y)=>x+y,0)/a.length : null;
+
+  return {
+    kccj_mean: mean(kccj),
+    fail_mean: mean(fail),
+    att_mean: mean(att),
+  };
+}
+
+function termTotal(term){
+  if(!term) return studentRows.length;
+  return studentRows.filter(r=>r.TERM_KEY===term).length;
+}
+
+function renderShareTrend(){
+  if(!charts.share) charts.share = echarts.init(document.getElementById('chart-mode-share'));
+  const byTerm = groupBy(studentRows, r=>r.TERM_KEY);
+  const terms = [...byTerm.keys()].filter(Boolean).sort();
+  const mode = state.mode;
+  const series = terms.map(t=>{
+    const rs = byTerm.get(t) || [];
+    const n = rs.length || 1;
+    const k = rs.filter(r=>Number(r.mode_id)===Number(mode)).length;
+    return +(k/n*100).toFixed(2);
+  });
+  charts.share.setOption({
+    tooltip:{ trigger:'axis', formatter: p=>`${p[0].axisValue}<br/>${p[0].marker}${p[0].value}%` },
+    grid:{ left:50, right:14, top:18, bottom:38, containLabel:false },
+    xAxis:{ type:'category', data:terms, axisLabel:{fontSize:11, rotate:0} },
+    yAxis:{ type:'value', axisLabel:{formatter:v=>v+'%', fontSize:11}, max:100 },
+    series:[{ type:'line', data:series, smooth:true, symbol:'circle', symbolSize:6,
+      lineStyle:{color:MODE_COLORS[mode], width:2.5},
+      areaStyle:{ opacity:.12, color: MODE_COLORS[mode] },
+      itemStyle:{color:MODE_COLORS[mode]}
+    }]
+  });
+}
+
+function dimMeans(rows){
+  const mean = a => a.length ? a.reduce((x,y)=>x+y,0)/a.length : null;
+  const out = {};
+  for(const k of DIM_KEYS){
+    const vals = rows.map(r=>toNum(r[k])).filter(v=>v!=null);
+    out[k] = mean(vals);
+  }
+  return out;
+}
+
+function shortTermLabel(t){
+  if (!t || typeof t !== 'string') return t;
+  const m = t.match(/^(\d{4})[-/](\d{4})[-/]([12])/);
+  if (m) return `${m[1].slice(2)}-${m[3]}`;
+  const m2 = t.match(/^(\d{4})[-/]([12])/);
+  if (m2) return `${m2[1].slice(2)}-${m2[2]}`;
+  return t.length > 10 ? t.slice(0, 10) + '…' : t;
+}
+
+function renderDimTrend(){
+  if(!charts.dimTrend) charts.dimTrend = echarts.init(document.getElementById('chart-dim-trend'));
+  const mode = state.mode;
+  const byTerm = groupBy(studentRows.filter(r=>Number(r.mode_id)===Number(mode)), r=>r.TERM_KEY);
+  const terms = [...byTerm.keys()].filter(Boolean).sort();
+  const mean = a => a.length ? a.reduce((x,y)=>x+y,0)/a.length : null;
+  const series = DIM_KEYS.map((k,i)=>({
+    name: DIM_NAMES[i],
+    type:'line',
+    smooth:true,
+    symbol:'circle',
+    symbolSize:5,
+    data: terms.map(t=>{
+      const rs = byTerm.get(t)||[];
+      const vals = rs.map(r=>toNum(r[k])).filter(v=>v!=null);
+      const m = mean(vals);
+      return m==null?null:+m.toFixed(3);
+    }),
+    lineStyle:{ width:1.8, color: MODE_COLORS[i] },
+    itemStyle:{ color: MODE_COLORS[i] },
+  }));
+  charts.dimTrend.setOption({
+    tooltip:{ trigger:'axis' },
+    legend:{ type:'scroll', bottom:0, textStyle:{ fontSize:11 } },
+    grid:{ left:50, right:14, top:24, bottom:56, containLabel:false },
+    xAxis:{ type:'category', data:terms.map(shortTermLabel), axisLabel:{ fontSize:11 } },
+    yAxis:{ type:'value', axisLabel:{ fontSize:11 } },
+    series
+  });
+}
+
+function renderDimRadar(rows){
+  if(!charts.radar) charts.radar = echarts.init(document.getElementById('chart-dim-radar'));
+  const compare = document.getElementById('sel-compare').value;
+  const term = document.getElementById('sel-term').value;
+  const baseRows = compare==='overall'
+    ? (term ? studentRows.filter(r=>r.TERM_KEY===term) : studentRows)
+    : null;
+
+  const m1 = dimMeans(rows);
+  const v1 = DIM_KEYS.map(k=>m1[k]==null?0:+m1[k].toFixed(3));
+  const series = [{ name:'', value:v1, itemStyle:{ color: MODE_COLORS[state.mode] }, lineStyle:{ color: MODE_COLORS[state.mode] } }];
+
+  if(baseRows){
+    const m2 = dimMeans(baseRows);
+    const v2 = DIM_KEYS.map(k=>m2[k]==null?0:+m2[k].toFixed(3));
+    series.push({ name:'', value:v2, itemStyle:{ color:'#64748B' }, lineStyle:{ color:'#64748B' } });
+  }
+
+  const maxAbs = Math.max(...series.flatMap(s=>s.value.map(x=>Math.abs(x))), 1);
+  const lim = Math.max(1, Math.ceil(maxAbs*10)/10);
+
+  charts.radar.setOption({
+    tooltip:{
+      confine:false,
+      appendToBody:true,
+      className:'mode-chart-tooltip',
+      extraCssText:'max-width:min(400px,92vw);white-space:normal;word-break:break-word;line-height:1.55;'
+    },
+    legend:{ show:false },
+    radar:{
+      indicator: DIM_NAMES.map(n=>({ name:n, max: lim })),
+      splitNumber: 4,
+      axisName:{ color:'#334155', fontSize:12, fontWeight:600 },
+      splitLine:{ lineStyle:{ color:'#E2E8F0' } },
+      splitArea:{ areaStyle:{ color:['rgba(59,130,246,0.04)','rgba(59,130,246,0.02)'] } },
+      axisLine:{ lineStyle:{ color:'#CBD5E1' } }
+    },
+    series:[{
+      type:'radar',
+      data: series,
+      areaStyle:{ opacity:0.08 }
+    }]
+  });
+}
+
+function renderDimBox(rows){
+  if(!charts.box) charts.box = echarts.init(document.getElementById('chart-dim-box'));
+  const compare = document.getElementById('sel-compare').value;
+  const baseRows = compare==='overall' ? (document.getElementById('sel-term').value ? studentRows.filter(r=>r.TERM_KEY===document.getElementById('sel-term').value) : studentRows) : null;
+
+  const dataMode = DIM_KEYS.map(k=>buildBox(rows.map(r=>toNum(r[k]))));
+  const dataAll  = baseRows ? DIM_KEYS.map(k=>buildBox(baseRows.map(r=>toNum(r[k])))) : null;
+
+  const series = [
+    { name:'', type:'boxplot', data:dataMode, itemStyle:{ color: MODE_COLORS[state.mode] } }
+  ];
+  if (dataAll) series.push({ name:'', type:'boxplot', data:dataAll, itemStyle:{ color:'#64748B' } });
+
+  charts.box.setOption({
+    tooltip:{
+      trigger:'item',
+      confine:false,
+      appendToBody:true,
+      className:'mode-chart-tooltip',
+      extraCssText:'max-width:min(400px,92vw);white-space:normal;word-break:break-word;line-height:1.55;'
+    },
+    legend:{ show:false },
+    // 尽量占满：收紧 left，并强制显示全部维度标签（不自动跳过）
+    grid:{ left:42, right:12, top:18, bottom:34, containLabel:false },
+    xAxis:{
+      type:'category',
+      data: DIM_NAMES,
+      axisLabel:{
+        fontSize:11,
+        interval: 0,        // 强制显示全部类目
+        hideOverlap: false, // 不自动隐藏
+        rotate: 0
+      }
+    },
+    yAxis:{ type:'value', axisLabel:{fontSize:11} },
+    series
+  });
+}
+
+function renderSubtype(rows){
+  if(!charts.sub) charts.sub = echarts.init(document.getElementById('chart-subtype'));
+  const m = state.mode;
+  const counts = new Map();
+  for(const r of rows){
+    const sid = String(r.subtype_id||'');
+    if(!sid) continue;
+    counts.set(sid, (counts.get(sid)||0)+1);
+  }
+  const arr = [...counts.entries()]
+    .map(([sid, n]) => ({ sid, n, name: subtypeName(m, sid) }))
+    .sort((a,b)=>b.n-a.n)
+    .slice(0,10);
+  charts.sub.setOption({
+    tooltip:{
+      trigger:'axis',
+      axisPointer:{ type:'shadow' },
+      confine:false,
+      appendToBody:true,
+      className:'mode-chart-tooltip',
+      formatter: params => {
+        const p = params?.[0];
+        if (!p) return '';
+        const item = arr[p.dataIndex];
+        const extra = item?.sid ? `<div style="color:#94A3B8;font-size:11px;margin-top:2px;">ID：${escapeHtml(String(item.sid))}</div>` : '';
+        return `${escapeHtml(String(p.name))}<br/>数量：${p.value}${extra}`;
+      }
+    },
+    grid:{ left:8, right:16, top:12, bottom:12, containLabel:true },
+    xAxis:{ type:'value', boundaryGap:[0,0.06], axisLabel:{ fontSize:11 } },
+    yAxis:{
+      type:'category',
+      data: arr.map(x=>String(x.name)),
+      inverse:true,
+      position:'left',
+      axisLabel:{ show:false },
+      axisLine:{ show:true, lineStyle:{ color:'#E2E8F0' } },
+      axisTick:{ alignWithLabel:true }
+    },
+    series:[{
+      type:'bar',
+      data: arr.map(x=>x.n),
+      itemStyle:{ color: MODE_COLORS[m] },
+      barMaxWidth:24
+    }]
+  });
+}
+
+function topN(rows, key, limit){
+  const lim = limit == null ? 10 : limit;
+  const map = new Map();
+  for(const r of rows){
+    const k = r[key];
+    if(!k) continue;
+    map.set(k, (map.get(k)||0)+1);
+  }
+  return [...map.entries()].sort((a,b)=>b[1]-a[1]).slice(0, lim);
+}
+
+function horizontalBarOption(arr, title, color, opts){
+  const showY = !!opts?.showYAxisLabel;
+  return {
+    tooltip:{
+      trigger:'axis',
+      axisPointer:{ type:'shadow' },
+      confine:false,
+      appendToBody:true,
+      className:'mode-chart-tooltip',
+      formatter: params => {
+        const p = params?.[0];
+        if (!p) return '';
+        return `${escapeHtml(String(p.name))}<br/>数量：${p.value}`;
+      }
+    },
+    grid:{ left: showY ? 180 : 8, right:14, top:8, bottom:12, containLabel: !showY },
+    xAxis:{ type:'value', boundaryGap:[0,0.05], axisLabel:{ fontSize:11 } },
+    yAxis:{
+      type:'category',
+      data: arr.map(x=>String(x[0])),
+      inverse:true,
+      position:'left',
+      axisLabel: showY ? { show:true, fontSize:11, color:'#334155', width:160, overflow:'truncate', margin:8 } : { show:false },
+      axisLine:{ lineStyle:{ color:'#E2E8F0' } },
+      axisTick:{ alignWithLabel:true }
+    },
+    series:[{ name:title, type:'bar', data: arr.map(x=>x[1]), itemStyle:{ color }, barMaxWidth:20 }]
+  };
+}
+
+function renderTopBoth(rows){
+  if(!charts.topCollege) charts.topCollege = echarts.init(document.getElementById('chart-top-college'));
+  if(!charts.topMajor) charts.topMajor = echarts.init(document.getElementById('chart-top-major'));
+  const a = topN(rows, 'XSM', 10);
+  const b = topN(rows, 'ZYM', 10);
+  charts.topCollege.setOption(horizontalBarOption(a, '学院', '#3B82F6', { showYAxisLabel:false }));
+  charts.topMajor.setOption(horizontalBarOption(b, '专业', '#F59E0B', { showYAxisLabel:false }));
+}
+
+function renderSourceModalCharts(rows){
+  if(!charts.modalCollege) charts.modalCollege = echarts.init(document.getElementById('chart-modal-college'));
+  if(!charts.modalMajor) charts.modalMajor = echarts.init(document.getElementById('chart-modal-major'));
+  const a = topN(rows, 'XSM', 50);
+  const b = topN(rows, 'ZYM', 50);
+  charts.modalCollege.setOption(horizontalBarOption(a, '学院', '#3B82F6', { showYAxisLabel:true }));
+  charts.modalMajor.setOption(horizontalBarOption(b, '专业', '#F59E0B', { showYAxisLabel:true }));
+}
+
+window.openSourceDetailModal = function(){
+  const rows = filterRows();
+  const term = document.getElementById('sel-term').value || '全部学期';
+  const meta = document.getElementById('source-modal-meta');
+  if (meta) {
+    meta.textContent = `Mode ${state.mode} · ${modeName(state.mode)} · 学期：${term} · 本模式样本 ${rows.length.toLocaleString()} 条`;
+  }
+  openModal('modal-source-detail');
+  renderSourceModalCharts(rows);
+  requestAnimationFrame(()=>{
+    charts.modalCollege?.resize();
+    charts.modalMajor?.resize();
+  });
+  setTimeout(()=>{
+    charts.modalCollege?.resize();
+    charts.modalMajor?.resize();
+  }, 250);
+};
+
+function trHoverLabelHtml(j, i, count){
+  const prev = modeName(i);
+  const next = modeName(j);
+  const cnt = Number(count);
+  const countBlock = Number.isFinite(cnt) && cnt > 0
+    ? `<div class="tr-hl-n">迁移次数 <strong>${cnt}</strong></div>`
+    : '';
+  return `
+    <div class="tr-hl-k">上一学期</div>
+    <div class="tr-hl-v">${escapeHtml(prev)}</div>
+    <div class="tr-hl-k">下一学期</div>
+    <div class="tr-hl-v">${escapeHtml(next)}</div>
+    ${countBlock}
+  `;
+}
+
+function positionTrHoverLabel(el, wrap, px, py){
+  if (!el || !wrap || px == null || py == null) return;
+  const pad = 6;
+  const gap = 12;
+  const W = wrap.clientWidth;
+  const H = wrap.clientHeight;
+  const w = el.offsetWidth || 160;
+  const h = el.offsetHeight || 96;
+  let left = px + gap;
+  let top = py + gap;
+  if (left + w > W - pad) left = px - w - gap;
+  if (left < pad) left = pad;
+  if (top + h > H - pad) top = py - h - gap;
+  if (top < pad) top = pad;
+  el.style.left = `${left}px`;
+  el.style.top = `${top}px`;
+}
+
+function pointerInWrapFromEchartsParam(wrap, chart, param){
+  if (!wrap || !chart || !param) return null;
+  const ev = param.event;
+  const de = ev?.event ?? ev;
+  if (de?.clientX != null && de?.clientY != null){
+    const r = wrap.getBoundingClientRect();
+    return { x: de.clientX - r.left, y: de.clientY - r.top };
+  }
+  if (ev?.offsetX != null){
+    const zr = chart.getZr();
+    const zrDom = zr.dom.getBoundingClientRect();
+    const wr = wrap.getBoundingClientRect();
+    return {
+      x: ev.offsetX + (zrDom.left - wr.left),
+      y: ev.offsetY + (zrDom.top - wr.top)
+    };
+  }
+  return null;
+}
+
+function showTrHoverLabel(j, i, count, echartsParam){
+  const el = document.getElementById('tr-hover-label');
+  const wrap = el?.closest('.tr-chart-wrap');
+  if (!el || !wrap) return;
+  el.innerHTML = trHoverLabelHtml(j, i, count);
+  el.classList.add('is-visible');
+  const pt = charts.tr ? pointerInWrapFromEchartsParam(wrap, charts.tr, echartsParam) : null;
+  const run = ()=>{
+    if (pt) positionTrHoverLabel(el, wrap, pt.x, pt.y);
+    else positionTrHoverLabel(el, wrap, 12, 12);
+  };
+  requestAnimationFrame(()=>{ requestAnimationFrame(run); });
+}
+
+function hideTrHoverLabel(){
+  const el = document.getElementById('tr-hover-label');
+  if (!el) return;
+  el.classList.remove('is-visible');
+  el.innerHTML = '';
+  el.style.left = '';
+  el.style.top = '';
+}
+
+function bindTransitionChartPointerFollow(){
+  if (!charts.tr || charts.tr._trPointerFollowBound) return;
+  charts.tr._trPointerFollowBound = true;
+  charts.tr.getZr().on('mousemove', ev=>{
+    const el = document.getElementById('tr-hover-label');
+    if (!el || !el.classList.contains('is-visible')) return;
+    const wrap = el.closest('.tr-chart-wrap');
+    const de = ev.event;
+    if (!wrap || !de || de.clientX == null) return;
+    const r = wrap.getBoundingClientRect();
+    positionTrHoverLabel(el, wrap, de.clientX - r.left, de.clientY - r.top);
+  });
+}
+
+function renderTransition(){
+  if(!charts.tr) charts.tr = echarts.init(document.getElementById('chart-transition'));
+  // 构建每个学生按学期排序的序列
+  const byStu = groupBy(studentRows, r=>r.XH);
+  const mat = Array.from({length:8},()=>Array.from({length:8},()=>0));
+  for(const [xh, rs] of byStu.entries()){
+    const seq = rs.filter(r=>r.TERM_KEY && r.mode_id!=null)
+      .sort((a,b)=>String(a.TERM_KEY).localeCompare(String(b.TERM_KEY)));
+    for(let i=1;i<seq.length;i++){
+      const a = Number(seq[i-1].mode_id);
+      const b = Number(seq[i].mode_id);
+      if(Number.isFinite(a) && Number.isFinite(b) && a>=0 && a<8 && b>=0 && b<8) mat[a][b] += 1;
+    }
+  }
+  const vmax = Math.max(1, ...mat.flat());
+  const axisTick = Array.from({length:8},(_,k)=>String(k));
+  const data = [];
+  for(let i=0;i<8;i++) for(let j=0;j<8;j++){
+    data.push([j, i, mat[i][j]]);
+  }
+  charts.tr.setOption({
+    tooltip:{ show:false },
+    grid:{ left:28, right:8, top:8, bottom:48, containLabel:false },
+    xAxis:{
+      type:'category', data: axisTick,
+      axisLabel:{ show:false },
+      axisTick:{ alignWithLabel:true },
+      splitArea:{ show:true }
+    },
+    yAxis:{
+      type:'category', data: axisTick,
+      axisLabel:{ show:false },
+      axisTick:{ alignWithLabel:true },
+      splitArea:{ show:true }
+    },
+    visualMap:{
+      min:0, max: vmax,
+      calculable:true,
+      orient:'horizontal',
+      left:'center',
+      bottom:4,
+      textStyle:{ fontSize:11, color:'#64748B' },
+      inRange:{ color:['#F8FAFC','#93C5FD','#2563EB'] }
+    },
+    series:[{
+      type:'heatmap',
+      data,
+      label:{ show:false },
+      emphasis:{ itemStyle:{ shadowBlur:10, shadowColor:'rgba(0,0,0,0.18)' } }
+    }]
+  }, { notMerge:true });
+
+  charts.tr.off('mouseover');
+  charts.tr.off('globalout');
+  charts.tr.on('mouseover', p=>{
+    if (p.componentType !== 'series' || p.seriesType !== 'heatmap') return;
+    const raw = p.data;
+    const d = Array.isArray(raw) ? raw : raw?.value;
+    if (!Array.isArray(d) || d.length < 3) return;
+    showTrHoverLabel(d[0], d[1], d[2], p);
+  });
+  charts.tr.on('globalout', ()=> hideTrHoverLabel());
+  bindTransitionChartPointerFollow();
+}
+
+function renderAll(){
+  const rows = filterRows();
+  const term = document.getElementById('sel-term').value || '全部学期';
+  const total = termTotal(document.getElementById('sel-term').value);
+  const n = rows.length;
+  const pct = total ? n/total : 0;
+  const kpi = renderKPIs(rows);
+
+  document.getElementById('mode-title').textContent = '六维度均值';
+  document.getElementById('mode-title-sub').textContent = `Mode ${state.mode} · ${modeName(state.mode)} · 样本 ${n.toLocaleString()} · 占比 ${fmt.pct(pct)} · 成绩 ${kpi.kccj_mean==null?'—':kpi.kccj_mean.toFixed(1)} · 挂科 ${kpi.fail_mean==null?'—':fmt.pct(kpi.fail_mean)} · 出勤 ${kpi.att_mean==null?'—':fmt.pct(kpi.att_mean)}`;
+  document.getElementById('mode-sub').textContent = `当前筛选：${term}`;
+
+  applyRightDimLayout();
+  renderDimTrend();
+  renderShareTrend();
+  renderDimRadar(rows);
+  renderDimBox(rows);
+  applySubtypeCardLayout();
+  if (state.subtypeView === 'subtype_only') renderSubtype(rows);
+  else renderTopBoth(rows);
+  renderTransition();
+  setTimeout(()=>{ Object.values(charts).forEach(c=>c?.resize()); }, 0);
+}
+
+function escapeHtml(s){
+  return String(s ?? '')
+    .replaceAll('&','&amp;')
+    .replaceAll('<','&lt;')
+    .replaceAll('>','&gt;')
+    .replaceAll('"','&quot;')
+    .replaceAll("'",'&#39;');
+}
+
+function chatAdd(role, text){
+  const log = document.getElementById('chat-log');
+  const who = role==='user' ? '你' : 'AI';
+  const cls = role==='user' ? 'user' : 'ai';
+  const el = document.createElement('div');
+  el.className = 'chat-msg';
+  el.innerHTML = `<span class="chat-role ${cls}">${who}：</span><span>${escapeHtml(text)}</span>`;
+  log.appendChild(el);
+  log.scrollTop = log.scrollHeight;
+}
+
+window.chatClear = function(){
+  const log = document.getElementById('chat-log');
+  log.innerHTML = '';
+}
+
+function buildAIContext(){
+  const term = document.getElementById('sel-term').value || '全部学期';
+  const rows = filterRows();
+  const total = termTotal(document.getElementById('sel-term').value);
+  const n = rows.length;
+  const pct = total ? n/total : 0;
+  const kpi = renderKPIs(rows);
+  const means = dimMeans(rows);
+
+  // subtype top5
+  const st = new Map();
+  for(const r of rows){
+    const sid = r.subtype_id;
+    if(sid==null || sid==='') continue;
+    st.set(String(sid), (st.get(String(sid))||0)+1);
+  }
+  const stTop = [...st.entries()].sort((a,b)=>b[1]-a[1]).slice(0,5);
+
+  const collegeTop = topN(rows, 'XSM', 5);
+  const majorTop = topN(rows, 'ZYM', 5);
+
+  return {
+    page: 'mode.html',
+    mode_id: state.mode,
+    mode_name: modeName(state.mode),
+    term,
+    n_records: n,
+    pct_in_term: pct,
+    kpi: {
+      kccj_mean: kpi.kccj_mean,
+      kccj_fail_rate_mean: kpi.fail_mean,
+      att_present_rate_mean: kpi.att_mean,
+    },
+    dim_means: means,
+    subtype_top: stTop.map(([k,v])=>({ subtype_id:k, subtype_name: subtypeName(state.mode, k), n:v })),
+    college_top: collegeTop.map(([k,v])=>({ name:k, n:v })),
+    major_top: majorTop.map(([k,v])=>({ name:k, n:v })),
+    note: '请用通俗语言解释模式特征，并给出可行动建议；如有风险点请说明依据来自哪些指标。'
+  };
+}
+
+window.chatSend = async function(){
+  const ta = document.getElementById('chat-input');
+  const q = (ta.value||'').trim();
+  if(!q) return;
+  ta.value = '';
+  chatAdd('user', q);
+
+  const ctx = buildAIContext();
+  chatAdd('ai', '（分析中...）');
+  const log = document.getElementById('chat-log');
+  const last = log.lastElementChild;
+
+  try{
+    const url = './api/ai';
+    const res = await fetch(url, {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify({
+        messages: [
+          { role:'system', content:'你是高校学生行为画像分析助手。回答要简洁、通俗、可操作。' },
+          { role:'user', content:`上下文：${JSON.stringify(ctx)}\n\n问题：${q}` }
+        ]
+      })
+    });
+    if(!res.ok){
+      const t = await res.text();
+      last.querySelector('span:last-child').textContent = `请求失败：${t.slice(0,200)}`;
+      return;
+    }
+    const j = await res.json().catch(()=>null);
+    const text = j?.text || j?.answer || j?.choices?.[0]?.message?.content || '';
+    last.querySelector('span:last-child').textContent = text || '（后端未返回文本）';
+  }catch(e){
+    last.querySelector('span:last-child').textContent = `请求异常：${e?.message||e}`;
+  }
+  log.scrollTop = log.scrollHeight;
+}
+
+document.addEventListener('appReady', async ()=>{
+  try{
+    studentRows = (await loadStudents()).map(r=>{
+      // 只做必要字段的数值转换
+      const out = { ...r };
+      out.mode_id = toNum(out.mode_id);
+      out.subtype_id = toNum(out.subtype_id);
+      for(const k of DIM_KEYS) out[k] = toNum(out[k]);
+      out.kccj_mean = toNum(out.kccj_mean);
+      out.kccj_fail_rate = toNum(out.kccj_fail_rate);
+      out.att_present_rate = toNum(out.att_present_rate);
+      return out;
+    });
+    document.getElementById('loading').style.display='none';
+    document.getElementById('mode-content').style.display='';
+    renderModeTabs();
+    renderTermSel();
+    document.getElementById('mode-sub').textContent = '当前筛选：全部学期';
+    renderAll();
+  }catch(e){
+    console.error(e);
+    document.getElementById('app-error')?.removeAttribute('hidden');
+  }
+});
+</script>
+</body>
+</html>
+

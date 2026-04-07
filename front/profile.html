@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>学生行为画像系统 · 群体画像</title>
+  <link rel="stylesheet" href="css/style.css"/>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5/papaparse.min.js"></script>
+</head>
+<body>
+<nav class="nav">
+  <a class="nav-brand" href="overview.html"><em>学生行为</em>画像系统</a>
+  <div class="nav-links">
+    <a class="nav-link" href="overview.html">总览</a>
+    <a class="nav-link" href="profile.html">群体画像</a>
+    <a class="nav-link" href="trend.html">趋势分析</a>
+    <a class="nav-link" href="risk.html">风险预警</a>
+  </div>
+</nav>
+
+<div class="page">
+<div class="container">
+  <div class="card" style="padding:14px 18px; margin-bottom:12px;">
+    <div style="font-weight:700;">群体画像已合并到总览页。</div>
+    <div style="font-size:13px;color:var(--text-2);margin-top:6px;">正在跳转到合并页面…</div>
+  </div>
+
+  <div id="app-error" hidden style="padding:20px;background:#FEF2F2;border:1px solid #FCA5A5;border-radius:12px;color:#DC2626;margin-bottom:20px;">
+    ⚠️ 请通过 HTTP 服务器访问（<code>python -m http.server 8080</code>）
+  </div>
+
+  <script>
+    // 保持旧链接可用：跳到合并后的总览页并自动切到群体模式
+    const h = location.hash && location.hash.startsWith('#') ? location.hash : '';
+    location.replace('overview.html' + (h || '#group'));
+  </script>
+</div>
+</div>
+
+<!-- 对比弹窗 -->
+<div class="overlay" id="modal-cmp">
+  <div class="modal" style="max-width:440px">
+    <div class="modal-hd"><h2>添加对比群体</h2><button class="modal-close">✕</button></div>
+    <div class="modal-bd">
+      <div class="gap-12" style="margin-bottom:16px;">
+        <span class="f-label">群体</span>
+        <select id="cmp-sel" style="flex:1"></select>
+      </div>
+      <div class="gap-12">
+        <button class="btn btn-primary" onclick="applyCompare()">确认对比</button>
+        <button class="btn btn-outline" onclick="clearCompare()">清除对比</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 说明：本页已合并，不再加载数据脚本 -->
+
+</body>
+</html>

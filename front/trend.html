@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>学生行为画像系统 · 趋势分析</title>
+  <link rel="stylesheet" href="css/style.css"/>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5/papaparse.min.js"></script>
+</head>
+<body>
+<nav class="nav">
+  <a class="nav-brand" href="overview.html"><em>学生行为</em>画像系统</a>
+  <div class="nav-links">
+    <a class="nav-link" href="overview.html">总览</a>
+      <a class="nav-link" href="mode.html">模式分析</a>
+    <a class="nav-link" href="trend.html">趋势分析</a>
+    <a class="nav-link" href="risk.html">风险预警</a>
+  </div>
+</nav>
+
+<div class="page"><div class="container">
+
+  <div id="app-error" hidden style="padding:20px;background:#FEF2F2;border:1px solid #FCA5A5;border-radius:12px;color:#DC2626;margin-bottom:20px;">
+    ⚠️ 请通过 HTTP 服务器访问（<code>python -m http.server 8080</code>）
+  </div>
+
+  <div class="filter-bar">
+    <span class="f-label">聚合维度</span>
+    <div class="tabs" id="level-tabs">
+      <button class="tab active" data-lv="college" onclick="setLevel('college',this)">学院</button>
+      <button class="tab" data-lv="major"   onclick="setLevel('major',this)">专业</button>
+      <button class="tab" data-lv="class"   onclick="setLevel('class',this)">班级</button>
+    </div>
+    <span class="f-label">选择群体</span>
+    <select id="sel-group" onchange="onGroupChange()"></select>
+    <span class="f-label">指标</span>
+    <select id="sel-metric" onchange="renderLine()">
+      <option value="kccj_mean_avg">成绩均值</option>
+      <option value="kccj_fail_rate_avg">挂科率</option>
+      <option value="att_present_rate_avg">出勤率</option>
+      <option value="online_bfb_avg">线上完成率</option>
+      <option value="dim_academic_mean">学业维度分</option>
+      <option value="dim_attendance_engagement_mean">出勤参与维度分</option>
+      <option value="dim_development_mean">发展成就维度分</option>
+    </select>
+  </div>
+
+  <div id="loading" class="loading"><div class="spinner"></div><div>加载中...</div></div>
+  <div id="trend-content" style="display:none" class="panel-root">
+    <div class="panel-center">
+      <div class="board4">
+        <!-- 左侧：上下两个指标图 -->
+        <div class="board-left vstack">
+          <div class="card">
+            <div class="card-hd"><span class="card-title" id="line-title">成绩均值趋势</span></div>
+            <div id="chart-line" class="chart-fill"></div>
+          </div>
+          <div class="card">
+            <div class="card-hd"><span class="card-title">六维度均值趋势</span></div>
+            <div id="chart-dims" class="chart-fill"></div>
+          </div>
+        </div>
+
+        <!-- 右侧 3/4：上=结构（3/4高） 下=AI（1/4高） -->
+        <div class="center-card board-span-3" style="display:flex; flex-direction:column; min-height:0;">
+          <div style="flex:3; min-height:0; display:flex; flex-direction:column;">
+            <div class="card-hd">
+              <span class="card-title">模式结构随学期变化（堆叠面积）</span>
+            </div>
+            <div class="card-bd" style="flex:1;min-height:0;">
+              <div id="trend-stack" class="chart-fill"></div>
+            </div>
+          </div>
+          <div style="flex:1.5; min-height:0; border-top:1px solid var(--border); display:flex; flex-direction:column;">
+            <div class="card-hd">
+              <span class="card-title">AI 分析</span>
+            </div>
+            <div class="card-bd chat" style="padding-top:10px;">
+              <div class="chat-log" id="chat-log">
+                <div class="chat-msg">
+                  <span class="chat-role ai">AI</span>
+                  <span>你可以提问趋势变化的原因、风险信号、以及建议。我会把群体、学期序列、结构与指标曲线摘要作为上下文发送到后端。</span>
+                </div>
+              </div>
+              <div class="chat-input">
+                <textarea id="chat-q" placeholder="例如：哪些学期风险信号更明显？可能原因是什么？给出3条建议。"></textarea>
+                <button class="btn btn-primary" id="chat-send" onclick="chatSend()">发送</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div></div>
+
+<script src="js/common.js"></script>
+<script>
+let state = { lv:'college', group:'' };
+let charts = {};
+const METRIC_LABELS = {
+  kccj_mean_avg:'成绩均值', kccj_fail_rate_avg:'挂科率',
+  att_present_rate_avg:'出勤率', online_bfb_avg:'线上完成率',
+  dim_academic_mean:'学业维度分', dim_attendance_engagement_mean:'出勤参与维度分',
+  dim_development_mean:'发展成就维度分'
+};
+
+function shortTerm(t){
+  const s = String(t || '');
+  const m = s.match(/^(\d{4})-(\d{4})-(\d+)$/);
+  if (!m) return s;
+  const y1 = Number(m[1]);
+  const y2 = Number(m[2]);
+  const q  = m[3];
+  if (!Number.isFinite(y1) || !Number.isFinite(y2)) return s;
+  // 2020-2021-1 -> 0-1-1（仅用于轴标签，减少拥挤）
+  return `${y1 % 10}-${y2 % 10}-${q}`;
+}
+
+document.addEventListener('appReady', ()=>{
+  document.getElementById('loading').style.display='none';
+  document.getElementById('trend-content').style.display='';
+  populateGroupSel();
+  renderAll();
+});
+
+function getRows(lv){ return lv==='college'?AppData.college:lv==='major'?AppData.major:AppData.clazz; }
+function groupKey(lv){ return lv==='college'?'XSM':lv==='major'?'ZYM':'CLASS_NAME'; }
+
+function setLevel(lv, btn) {
+  state.lv=lv;
+  document.querySelectorAll('#level-tabs .tab').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  populateGroupSel(); renderAll();
+}
+function onGroupChange(){ state.group=document.getElementById('sel-group').value; renderAll(); }
+
+function populateGroupSel() {
+  const rows  = getRows(state.lv);
+  const key   = groupKey(state.lv);
+  const gs    = [...new Set(rows.map(r=>r[key]).filter(Boolean))].sort();
+  const sel   = document.getElementById('sel-group');
+  sel.innerHTML = gs.map(g=>`<option value="${g}">${g}</option>`).join('');
+  state.group = gs[0]||'';
+}
+
+function getGroupRows() {
+  const key = groupKey(state.lv);
+  return getRows(state.lv).filter(r=>r[key]===state.group).sort((a,b)=>a.TERM_KEY<b.TERM_KEY?-1:1);
+}
+
+function renderAll() { renderStack(); renderLine(); renderDimsTrend(); }
+
+function renderStack() {
+  if (!charts.stack) charts.stack = echarts.init(document.getElementById('trend-stack'));
+  const rows  = getGroupRows();
+  const terms = rows.map(r=>r.TERM_KEY);
+  const series = AppData.modes.map(m=>({
+    name: m.name, type:'line', stack:'total',
+    areaStyle:{ opacity:.65, color:MODE_COLORS[m.mode_id] },
+    lineStyle:{ width:0 }, symbol:'none',
+    data: rows.map(r=>((parseFloat(r[`mode_${m.mode_id}_pct`])||0)*100).toFixed(2)),
+    itemStyle:{ color:MODE_COLORS[m.mode_id] }
+  }));
+  charts.stack.setOption({
+    tooltip:{ trigger:'axis', axisPointer:{type:'cross'}, formatter: params=>{
+      let s = `<b>${params[0].axisValue}</b><br/>`;
+      params.forEach(p=>{ s+=`${p.marker}${p.seriesName}: ${p.value}%<br/>`; });
+      return s;
+    }},
+    legend:{ type:'scroll', bottom:0, textStyle:{fontSize:11} },
+    grid:{ left:50, right:14, top:24, bottom:56, containLabel:false },
+    xAxis:{ type:'category', data:terms, axisLabel:{fontSize:11,rotate:0, formatter: shortTerm} },
+    yAxis:{ type:'value', max:100, axisLabel:{formatter:v=>v+'%', fontSize:11} },
+    series
+  });
+}
+
+function renderLine() {
+  if (!charts.line) charts.line = echarts.init(document.getElementById('chart-line'));
+  const metric = document.getElementById('sel-metric').value;
+  const rows   = getGroupRows();
+  const terms  = rows.map(r=>r.TERM_KEY);
+  const vals   = rows.map(r=>{ const v=parseFloat(r[metric]); return isNaN(v)?null:+v.toFixed(3); });
+  const isRate = metric.includes('rate') || metric.includes('bfb');
+  document.getElementById('line-title').textContent = (METRIC_LABELS[metric]||metric)+'趋势';
+  charts.line.setOption({
+    tooltip:{ trigger:'axis', formatter: p=>`${p[0].axisValue}<br/>${p[0].marker}${isRate?(p[0].value*100).toFixed(1)+'%':p[0].value}` },
+    grid:{ left:50, right:14, top:24, bottom:48, containLabel:false },
+    xAxis:{ type:'category', data:terms, axisLabel:{fontSize:11,rotate:0, formatter: shortTerm} },
+    yAxis:{ type:'value', axisLabel:{ formatter: v=>isRate?(v*100).toFixed(0)+'%':v, fontSize:11 } },
+    series:[{ type:'line', data:vals, smooth:true,
+      lineStyle:{color:'#3B82F6',width:2.5},
+      itemStyle:{color:'#3B82F6'},
+      areaStyle:{color:{type:'linear',x:0,y:0,x2:0,y2:1,colorStops:[{offset:0,color:'#BFDBFE'},{offset:1,color:'#EFF6FF'}]}},
+      symbol:'circle', symbolSize:6
+    }]
+  });
+}
+
+function renderDimsTrend() {
+  if (!charts.dims) charts.dims = echarts.init(document.getElementById('chart-dims'));
+  const rows  = getGroupRows();
+  const terms = rows.map(r=>r.TERM_KEY);
+  const series = DIM_KEYS.map((k,i)=>({
+    name: DIM_NAMES[i], type:'line', smooth:true,
+    data: rows.map(r=>{ const v=parseFloat(r[k+'_mean']); return isNaN(v)?null:+v.toFixed(3); }),
+    lineStyle:{ color:MODE_COLORS[i], width:1.8 },
+    itemStyle:{ color:MODE_COLORS[i] },
+    symbol:'circle', symbolSize:5
+  }));
+  charts.dims.setOption({
+    tooltip:{ trigger:'axis' },
+    legend:{ type:'scroll', bottom:0, textStyle:{fontSize:11} },
+    grid:{ left:50, right:14, top:24, bottom:56, containLabel:false },
+    xAxis:{ type:'category', data:terms, axisLabel:{fontSize:11,rotate:0, formatter: shortTerm} },
+    yAxis:{ type:'value', axisLabel:{fontSize:11} },
+    series
+  });
+}
+
+window.chatSend = async function(){
+  const qEl = document.getElementById('chat-q');
+  const q = (qEl.value||'').trim();
+  if (!q) return;
+  qEl.value = '';
+  const log = document.getElementById('chat-log');
+  const append = (role, text) => {
+    const div = document.createElement('div');
+    div.className = 'chat-msg';
+    div.innerHTML = `<span class="chat-role ${role==='user'?'user':'ai'}">${role==='user'?'你':'AI'}</span><span></span>`;
+    div.querySelector('span:last-child').textContent = text;
+    log.appendChild(div);
+    log.scrollTop = log.scrollHeight;
+    return div;
+  };
+  append('user', q);
+  const aiDiv = append('ai', '思考中…');
+
+  const metric = document.getElementById('sel-metric').value;
+  const rows = getGroupRows();
+  const terms = rows.map(r=>r.TERM_KEY);
+  const metricVals = rows.map(r=>{ const v=parseFloat(r[metric]); return isNaN(v)?null:+v.toFixed(3); });
+  const modeSeries = AppData.modes.map(m=>rows.map(r=>{ const v=parseFloat(r[`mode_${m.mode_id}_pct`]); return isNaN(v)?null:+(v*100).toFixed(2); }));
+  const payload = {
+    task: 'trend_chat',
+    group_context: { lv: state.lv, group: state.group, metric },
+    series_summary: {
+      terms,
+      metric_vals: metricVals,
+      dims: DIM_KEYS.map(k=>rows.map(r=>{ const v=parseFloat(r[k+'_mean']); return isNaN(v)?null:+v.toFixed(3); })),
+      mode_pct: modeSeries
+    },
+    message: q
+  };
+
+  const btn = document.getElementById('chat-send');
+  btn.disabled = true;
+  try{
+    const res = await fetch('/api/ai', {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const text = await res.text();
+    if (!res.ok) throw new Error(text || `${res.status} ${res.statusText}`);
+    aiDiv.querySelector('span:last-child').textContent = text;
+  }catch(e){
+    aiDiv.querySelector('span:last-child').textContent =
+      `AI 后端尚未接入或请求失败：${String(e?.message||e)}\n（后续把 /api/ai 接到你们的大模型代理即可）`;
+  }finally{
+    btn.disabled = false;
+  }
+};
+
+window.addEventListener('resize', ()=>{ charts.stack?.resize(); charts.line?.resize(); charts.dims?.resize(); });
+</script>
+</body>
+</html>

@@ -36,7 +36,8 @@ OUT_MODE_SEL = OUT_DIR / "mode_model_selection.csv"
 OUT_SUB_SEL = OUT_DIR / "subtype_model_selection.csv"
 
 
-MODE_K_LIST = list(range(4, 13))
+# 最终展示版口径：固定 mode=8（你确认“稳定性优先”后采用）
+MODE_K_LIST = [8]
 SUB_K_LIST = [2, 3, 4]
 RANDOM_STATE = 42
 
@@ -46,7 +47,7 @@ def _entropy(p: np.ndarray) -> np.ndarray:
     return -(p * np.log(p)).sum(axis=1)
 
 
-def _fit_best_gmm(x: np.ndarray, k_list: list[int]) -> tuple[int, object, pd.DataFrame]:
+def _fit_best_gmm(x: np.ndarray, k_list: list[int], n_init: int = 3) -> tuple[int, object, pd.DataFrame]:
     from sklearn.mixture import GaussianMixture
 
     rows = []
@@ -57,7 +58,7 @@ def _fit_best_gmm(x: np.ndarray, k_list: list[int]) -> tuple[int, object, pd.Dat
             covariance_type="full",
             reg_covar=1e-6,
             random_state=RANDOM_STATE,
-            n_init=3,
+            n_init=n_init,
             max_iter=500,
         )
         gmm.fit(x)
@@ -87,8 +88,8 @@ def main() -> None:
     x_mode = base[dim_cols].apply(pd.to_numeric, errors="coerce")
     x_mode = x_mode.fillna(x_mode.median(numeric_only=True)).to_numpy()
 
-    # 1) 模式层：按维度分数聚类
-    mode_k, mode_model, mode_sel = _fit_best_gmm(x_mode, MODE_K_LIST)
+    # 1) 模式层：按维度分数聚类（n_init=3，已通过稳定性评估，保持可解释解）
+    mode_k, mode_model, mode_sel = _fit_best_gmm(x_mode, MODE_K_LIST, n_init=3)
     mode_sel.to_csv(OUT_MODE_SEL, index=False, encoding="utf-8-sig")
 
     p_mode = mode_model.predict_proba(x_mode)
@@ -129,7 +130,7 @@ def main() -> None:
         sd = np.where(np.isfinite(sd) & (sd > 1e-9), sd, 1.0)
         x_sub_z = (np.nan_to_num(x_sub, nan=mu) - mu) / sd
 
-        k_sub, sub_model, sub_sel = _fit_best_gmm(x_sub_z, SUB_K_LIST)
+        k_sub, sub_model, sub_sel = _fit_best_gmm(x_sub_z, SUB_K_LIST, n_init=10)
         sub_sel["mode_id"] = m
         sub_sel_rows.append({"mode_id": m, "k": k_sub, "bic": float(sub_sel.iloc[0]["bic"]), "aic": float(sub_sel.iloc[0]["aic"]), "note": "bic_best"})
 

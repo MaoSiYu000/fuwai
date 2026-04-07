@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>学生画像看板（mode=8）</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  </head>
+  <body>
+    <div class="app">
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand-mark">MODE·8</div>
+          <div class="brand-title">
+            <div class="t1">学生画像看板</div>
+            <div class="t2">个体画像 · 群体画像 · 解释材料 · 预留LLM接口</div>
+          </div>
+        </div>
+        <nav class="tabs" role="tablist" aria-label="页面切换">
+          <button class="tab is-active" data-route="overview" role="tab">总览</button>
+          <button class="tab" data-route="student" role="tab">学生</button>
+          <button class="tab" data-route="group" role="tab">群体</button>
+          <button class="tab" data-route="modes" role="tab">模式说明</button>
+          <button class="tab" data-route="llm" role="tab">LLM接口</button>
+        </nav>
+      </header>
+
+      <main class="main">
+        <section class="hero">
+          <div class="hero-center">
+            <div class="hero-kpis">
+              <div class="kpi">
+                <div class="kpi-label">学生-学期样本</div>
+                <div class="kpi-value" id="kpiRows">—</div>
+              </div>
+              <div class="kpi">
+                <div class="kpi-label">模式数（mode）</div>
+                <div class="kpi-value" id="kpiK">8</div>
+              </div>
+              <div class="kpi">
+                <div class="kpi-label">细分数（subtype）</div>
+                <div class="kpi-value" id="kpiSub">—</div>
+              </div>
+              <div class="kpi">
+                <div class="kpi-label">数据状态</div>
+                <div class="kpi-value kpi-small" id="kpiStatus">等待加载</div>
+              </div>
+            </div>
+
+            <div class="hero-card">
+              <div class="hero-card-title">中心信息（先看这个）</div>
+              <div class="hero-card-sub">
+                默认展示总体 mode 分布与主要模式。更详细内容通过点击卡片/表格行进入。
+              </div>
+              <div class="hero-grid">
+                <div class="panel">
+                  <div class="panel-hd">
+                    <div class="panel-title">总体 mode 分布</div>
+                    <div class="panel-actions">
+                      <button class="btn btn-ghost" id="btnReload">重新加载</button>
+                    </div>
+                  </div>
+                  <div class="panel-bd">
+                    <canvas id="chartModeDist" height="140"></canvas>
+                    <div class="muted" id="overviewHint"></div>
+                  </div>
+                </div>
+                <div class="panel">
+                  <div class="panel-hd">
+                    <div class="panel-title">模式速览（点击看详情）</div>
+                  </div>
+                  <div class="panel-bd" id="modeCards"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="page" id="page-overview" data-page="overview"></section>
+
+        <section class="page" id="page-student" data-page="student" hidden>
+          <div class="page-hd">
+            <div class="page-title">学生个体画像</div>
+            <div class="page-sub">按学号与学期查询；点击“展开细节”查看概率分布、维度雷达图、原始指标与 evidence。</div>
+          </div>
+
+          <div class="form-row">
+            <div class="field">
+              <label>学号（XH）</label>
+              <input id="inpXH" placeholder="例如 pjxyqwbj585" />
+            </div>
+            <div class="field">
+              <label>学期（TERM_KEY，可选）</label>
+              <input id="inpTerm" placeholder="例如 2022-2023-1（留空=该学生全部学期）" />
+            </div>
+            <div class="field field-btn">
+              <button class="btn" id="btnFindStudent">查询</button>
+            </div>
+          </div>
+
+          <div class="content-grid">
+            <div class="panel">
+              <div class="panel-hd">
+                <div class="panel-title">查询结果</div>
+                <div class="panel-actions">
+                  <span class="pill" id="studentCount">—</span>
+                </div>
+              </div>
+              <div class="panel-bd">
+                <div id="studentTableWrap" class="table-wrap"></div>
+              </div>
+            </div>
+
+            <div class="panel">
+              <div class="panel-hd">
+                <div class="panel-title">选中记录详情</div>
+                <div class="panel-actions">
+                  <button class="btn btn-ghost" id="btnOpenLLMFromStudent" disabled>用LLM生成解释（预留）</button>
+                </div>
+              </div>
+              <div class="panel-bd" id="studentDetailEmpty">
+                <div class="empty">
+                  点击左侧表格中的一行，查看该学生该学期的详细画像。
+                </div>
+              </div>
+              <div class="panel-bd" id="studentDetail" hidden>
+                <div class="detail-head">
+                  <div>
+                    <div class="detail-title" id="dTitle">—</div>
+                    <div class="detail-sub" id="dSub">—</div>
+                  </div>
+                  <div class="badge" id="dBadge">—</div>
+                </div>
+
+                <div class="mini-grid">
+                  <div class="mini">
+                    <div class="mini-label">mode_pmax</div>
+                    <div class="mini-value" id="dPmax">—</div>
+                  </div>
+                  <div class="mini">
+                    <div class="mini-label">mode_margin</div>
+                    <div class="mini-value" id="dMargin">—</div>
+                  </div>
+                  <div class="mini">
+                    <div class="mini-label">mode_entropy</div>
+                    <div class="mini-value" id="dEntropy">—</div>
+                  </div>
+                </div>
+
+                <div class="detail-split">
+                  <div class="panel panel-inner">
+                    <div class="panel-hd">
+                      <div class="panel-title">6维度雷达图</div>
+                    </div>
+                    <div class="panel-bd">
+                      <canvas id="chartRadar" height="180"></canvas>
+                    </div>
+                  </div>
+                  <div class="panel panel-inner">
+                    <div class="panel-hd">
+                      <div class="panel-title">mode 概率分布</div>
+                    </div>
+                    <div class="panel-bd">
+                      <canvas id="chartProb" height="180"></canvas>
+                    </div>
+                  </div>
+                </div>
+
+                <details class="details">
+                  <summary>展开：mode_evidence（可直接展示/可喂给大模型）</summary>
+                  <div class="mono" id="dEvidence">—</div>
+                </details>
+
+                <details class="details">
+                  <summary>展开：原始指标（用于解释与可视化）</summary>
+                  <div id="dRawTable" class="table-wrap"></div>
+                </details>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="page" id="page-group" data-page="group" hidden>
+          <div class="page-hd">
+            <div class="page-title">群体画像</div>
+            <div class="page-sub">按班级/专业/学院筛选；点击一行查看 mode 分布与维度雷达图。</div>
+          </div>
+
+          <div class="form-row">
+            <div class="field">
+              <label>聚合维度</label>
+              <select id="selGroupLevel">
+                <option value="class">班级</option>
+                <option value="major">专业</option>
+                <option value="college">学院</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>关键词（名称包含）</label>
+              <input id="inpGroupQuery" placeholder="例如 2004 / 通信工程学院 / 电子信息工程" />
+            </div>
+            <div class="field">
+              <label>学期（TERM_KEY，可选）</label>
+              <input id="inpGroupTerm" placeholder="例如 2022-2023-1（留空=全部）" />
+            </div>
+            <div class="field field-btn">
+              <button class="btn" id="btnFindGroup">筛选</button>
+            </div>
+          </div>
+
+          <div class="content-grid">
+            <div class="panel">
+              <div class="panel-hd">
+                <div class="panel-title">筛选结果</div>
+                <div class="panel-actions">
+                  <span class="pill" id="groupCount">—</span>
+                </div>
+              </div>
+              <div class="panel-bd">
+                <div id="groupTableWrap" class="table-wrap"></div>
+              </div>
+            </div>
+
+            <div class="panel">
+              <div class="panel-hd">
+                <div class="panel-title">选中群体详情</div>
+              </div>
+              <div class="panel-bd" id="groupDetailEmpty">
+                <div class="empty">点击左侧任意一行查看群体画像细节。</div>
+              </div>
+              <div class="panel-bd" id="groupDetail" hidden>
+                <div class="detail-head">
+                  <div>
+                    <div class="detail-title" id="gTitle">—</div>
+                    <div class="detail-sub" id="gSub">—</div>
+                  </div>
+                  <div class="badge" id="gBadge">—</div>
+                </div>
+                <div class="detail-split">
+                  <div class="panel panel-inner">
+                    <div class="panel-hd">
+                      <div class="panel-title">mode 分布（占比）</div>
+                    </div>
+                    <div class="panel-bd">
+                      <canvas id="chartGroupMode" height="180"></canvas>
+                    </div>
+                  </div>
+                  <div class="panel panel-inner">
+                    <div class="panel-hd">
+                      <div class="panel-title">6维度均值雷达图</div>
+                    </div>
+                    <div class="panel-bd">
+                      <canvas id="chartGroupRadar" height="180"></canvas>
+                    </div>
+                  </div>
+                </div>
+                <details class="details">
+                  <summary>展开：关键指标均值（表格）</summary>
+                  <div id="gRawTable" class="table-wrap"></div>
+                </details>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="page" id="page-modes" data-page="modes" hidden>
+          <div class="page-hd">
+            <div class="page-title">模式说明与公式</div>
+            <div class="page-sub">展示 mode/subtype 的定义（JSON）与 6维度分数计算公式（透明度）。</div>
+          </div>
+
+          <div class="content-grid">
+            <div class="panel">
+              <div class="panel-hd">
+                <div class="panel-title">mode 定义（mode_definitions.json）</div>
+              </div>
+              <div class="panel-bd" id="modeDefWrap"></div>
+            </div>
+            <div class="panel">
+              <div class="panel-hd">
+                <div class="panel-title">维度分数公式（dim_score_formulas.json）</div>
+              </div>
+              <div class="panel-bd" id="formulaWrap"></div>
+            </div>
+          </div>
+
+          <div class="panel mt">
+            <div class="panel-hd">
+              <div class="panel-title">subtype 定义（subtype_definitions.json）</div>
+            </div>
+            <div class="panel-bd" id="subtypeDefWrap"></div>
+          </div>
+        </section>
+
+        <section class="page" id="page-llm" data-page="llm" hidden>
+          <div class="page-hd">
+            <div class="page-title">LLM 接口（预留）</div>
+            <div class="page-sub">这里不写死任何厂商。你后面只需要把接口地址/鉴权方式填进来即可。</div>
+          </div>
+
+          <div class="content-grid">
+            <div class="panel">
+              <div class="panel-hd">
+                <div class="panel-title">接口配置</div>
+              </div>
+              <div class="panel-bd">
+                <div class="form-row">
+                  <div class="field">
+                    <label>Endpoint（你的后端/代理地址）</label>
+                    <input id="llmEndpoint" placeholder="例如 http://localhost:8000/api/llm" />
+                  </div>
+                  <div class="field">
+                    <label>API Key（可选，不建议写死在前端）</label>
+                    <input id="llmKey" placeholder="留空=不带 key（建议用后端代理）" />
+                  </div>
+                </div>
+                <div class="muted">
+                  建议：前端不要直连大模型，把 key 放在后端；这里先按“预留接口”设计，便于你们后续接入。
+                </div>
+              </div>
+            </div>
+
+            <div class="panel">
+              <div class="panel-hd">
+                <div class="panel-title">快速测试（用选中学生记录生成解释）</div>
+                <div class="panel-actions">
+                  <button class="btn" id="btnLLMTest" disabled>发送（需要先在“学生页”选中一条记录）</button>
+                </div>
+              </div>
+              <div class="panel-bd">
+                <div class="muted">输入将自动使用你在“学生页”选中的那条记录（含 mode_evidence、维度分数、关键指标等）。</div>
+                <details class="details">
+                  <summary>展开：即将发送的 payload（调试用）</summary>
+                  <pre class="mono" id="llmPayloadPreview">—</pre>
+                </details>
+                <details class="details" open>
+                  <summary>输出</summary>
+                  <pre class="mono" id="llmOutput">—</pre>
+                </details>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <footer class="footer">
+        <div class="muted">
+          数据路径约定：把 `front/data/*` 放齐后即可运行（建议用本地静态服务器打开本页面）。
+        </div>
+      </footer>
+    </div>
+
+    <div class="modal" id="modal" hidden>
+      <div class="modal-backdrop" data-close="1"></div>
+      <div class="modal-card">
+        <div class="modal-hd">
+          <div class="modal-title" id="modalTitle">—</div>
+          <button class="btn btn-ghost" data-close="1">关闭</button>
+        </div>
+        <div class="modal-bd" id="modalBody"></div>
+      </div>
+    </div>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
+

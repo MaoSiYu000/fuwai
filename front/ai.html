@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>学生行为画像系统 · AI分析</title>
+  <link rel="stylesheet" href="css/style.css"/>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5/papaparse.min.js"></script>
+</head>
+<body>
+<nav class="nav">
+  <a class="nav-brand" href="overview.html"><em>学生行为</em>画像系统</a>
+  <div class="nav-links">
+    <a class="nav-link" href="overview.html">总览</a>
+    <a class="nav-link" href="profile.html">群体画像</a>
+    <a class="nav-link" href="trend.html">趋势分析</a>
+    <a class="nav-link" href="risk.html">风险预警</a>
+  </div>
+</nav>
+
+<div class="page"><div class="container">
+
+  <div id="app-error" hidden style="padding:20px;background:#FEF2F2;border:1px solid #FCA5A5;border-radius:12px;color:#DC2626;margin-bottom:20px;">
+    ⚠️ 请通过 HTTP 服务器访问
+  </div>
+
+  <div class="ph">
+    <h1>AI 智能分析 <span style="font-size:14px;color:var(--text-3);font-weight:400;">（接口预留）</span></h1>
+    <p>基于聚类画像数据，自动生成 Prompt 并调用大语言模型获取个性化群体分析报告</p>
+  </div>
+
+  <div id="loading" class="loading"><div class="spinner"></div><div>加载中...</div></div>
+  <div id="ai-content" style="display:none">
+
+    <!-- 两栏：左侧配置 + 右侧结果 -->
+    <div class="g2" style="gap:20px;align-items:start">
+
+      <!-- 左侧 -->
+      <div style="display:flex;flex-direction:column;gap:16px;">
+
+        <!-- API 配置 -->
+        <div class="card">
+          <div class="card-hd"><span class="card-title">🔧 API 配置</span></div>
+          <div class="card-bd" style="display:flex;flex-direction:column;gap:10px;">
+            <div>
+              <div class="kpi-label" style="margin-bottom:5px">API 地址</div>
+              <input id="cfg-url" placeholder="https://api.openai.com/v1/chat/completions" style="width:100%"
+                value="https://api.openai.com/v1/chat/completions"/>
+            </div>
+            <div>
+              <div class="kpi-label" style="margin-bottom:5px">API Key</div>
+              <input id="cfg-key" type="password" placeholder="sk-..." style="width:100%"/>
+            </div>
+            <div>
+              <div class="kpi-label" style="margin-bottom:5px">模型</div>
+              <select id="cfg-model" style="width:100%">
+                <option>gpt-4o</option>
+                <option>gpt-4o-mini</option>
+                <option>gpt-4-turbo</option>
+                <option value="custom">自定义...</option>
+              </select>
+              <input id="cfg-model-custom" placeholder="自定义模型名称" style="width:100%;margin-top:6px;display:none"/>
+            </div>
+            <div style="padding:10px;background:#FFFBEB;border:1px solid #FDE68A;border-radius:8px;font-size:12px;color:#92400E;line-height:1.6;">
+              ⚠️ API Key 仅存储在本地浏览器内存中，不会上传任何服务器。<br/>建议使用后刷新页面清除。
+            </div>
+          </div>
+        </div>
+
+        <!-- 数据选择 -->
+        <div class="card">
+          <div class="card-hd"><span class="card-title">📋 分析数据源</span></div>
+          <div class="card-bd" style="display:flex;flex-direction:column;gap:10px;">
+            <div>
+              <div class="kpi-label" style="margin-bottom:5px">聚合维度</div>
+              <div class="tabs" id="ai-level-tabs" style="margin-bottom:0">
+                <button class="tab active" onclick="aiSetLevel('college',this)">学院</button>
+                <button class="tab" onclick="aiSetLevel('major',this)">专业</button>
+                <button class="tab" onclick="aiSetLevel('class',this)">班级</button>
+              </div>
+            </div>
+            <div>
+              <div class="kpi-label" style="margin-bottom:5px">选择群体</div>
+              <select id="ai-sel-group" style="width:100%" onchange="aiRefreshPreview()"></select>
+            </div>
+            <div>
+              <div class="kpi-label" style="margin-bottom:5px">学期</div>
+              <select id="ai-sel-term" style="width:100%" onchange="aiRefreshPreview()"></select>
+            </div>
+            <div>
+              <div class="kpi-label" style="margin-bottom:5px">分析角度</div>
+              <select id="ai-angle" style="width:100%" onchange="buildPrompt()">
+                <option value="overall">综合画像解读</option>
+                <option value="risk">风险识别与干预建议</option>
+                <option value="trend">学期趋势分析</option>
+                <option value="compare">横向对比说明</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- 数据预览 -->
+        <div class="card">
+          <div class="card-hd flex-between">
+            <span class="card-title">📊 数据快照</span>
+            <button class="btn btn-outline btn-sm" onclick="aiRefreshPreview()">刷新</button>
+          </div>
+          <div class="card-bd" id="ai-data-preview">
+            <div class="empty">请先选择群体</div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- 右侧 -->
+      <div style="display:flex;flex-direction:column;gap:16px;">
+
+        <!-- Prompt 编辑区 -->
+        <div class="card">
+          <div class="card-hd flex-between">
+            <span class="card-title">✏️ Prompt（可编辑）</span>
+            <button class="btn btn-outline btn-sm" onclick="buildPrompt()">重新生成</button>
+          </div>
+          <div class="card-bd">
+            <textarea id="prompt-box" style="min-height:260px;font-size:12px;line-height:1.7;"></textarea>
+          </div>
+        </div>
+
+        <!-- 操作按钮 -->
+        <div style="display:flex;gap:10px;flex-wrap:wrap;">
+          <button class="btn btn-primary" onclick="callLLM()" id="btn-call" style="flex:1">
+            🚀 发送给大模型
+          </button>
+          <button class="btn btn-outline" onclick="copyPrompt()">复制 Prompt</button>
+          <button class="btn btn-outline" onclick="clearResult()">清空结果</button>
+        </div>
+
+        <!-- 状态 -->
+        <div id="ai-status" style="font-size:13px;color:var(--text-3);min-height:20px;"></div>
+
+        <!-- 响应结果 -->
+        <div class="card">
+          <div class="card-hd flex-between">
+            <span class="card-title">🤖 模型回复</span>
+            <div style="display:flex;gap:6px;align-items:center;">
+              <span id="ai-token-info" style="font-size:11px;color:var(--text-3)"></span>
+              <button class="btn btn-outline btn-sm" onclick="copyResult()">复制</button>
+            </div>
+          </div>
+          <div class="card-bd">
+            <div class="ai-response" id="ai-response" style="min-height:200px;">
+              <span style="color:var(--text-3)">模型回复将显示在此处...</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 说明 -->
+        <div style="background:#F0FDF4;border:1px solid #86EFAC;border-radius:10px;padding:14px;font-size:12px;color:#166534;line-height:1.7;">
+          <b>📌 接入说明</b><br/>
+          1. 填入任意兼容 OpenAI 格式的 API 地址和 Key（支持代理）<br/>
+          2. 点击「重新生成」自动构建包含群体数据的结构化 Prompt<br/>
+          3. 可手动编辑 Prompt 后再发送<br/>
+          4. 支持流式输出（stream: true）<br/>
+          5. 若需自建后端代理，将 API 地址改为你的代理 URL 即可
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div></div>
+
+<script src="js/common.js"></script>
+<script>
+let aiState = { lv:'college', group:'', term:'' };
+let aiRow = null;
+
+document.addEventListener('appReady', ()=>{
+  document.getElementById('loading').style.display='none';
+  document.getElementById('ai-content').style.display='';
+  aiPopulateGroup();
+  aiPopulateTerm();
+  aiRefreshPreview();
+});
+
+document.getElementById('cfg-model').addEventListener('change', function(){
+  document.getElementById('cfg-model-custom').style.display = this.value==='custom'?'block':'none';
+});
+
+function getRows(lv){ return lv==='college'?AppData.college:lv==='major'?AppData.major:AppData.clazz; }
+function groupKey(lv){ return lv==='college'?'XSM':lv==='major'?'ZYM':'CLASS_NAME'; }
+
+function aiSetLevel(lv, btn) {
+  aiState.lv=lv;
+  document.querySelectorAll('#ai-level-tabs .tab').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  aiPopulateGroup(); aiPopulateTerm(); aiRefreshPreview();
+}
+
+function aiPopulateGroup() {
+  const rows = getRows(aiState.lv);
+  const key  = groupKey(aiState.lv);
+  const gs   = [...new Set(rows.map(r=>r[key]).filter(Boolean))].sort();
+  const sel  = document.getElementById('ai-sel-group');
+  sel.innerHTML = gs.map(g=>`<option value="${g}">${g}</option>`).join('');
+  aiState.group = gs[0]||'';
+}
+
+function aiPopulateTerm() {
+  const rows  = getRows(aiState.lv);
+  const terms = [...new Set(rows.map(r=>r.TERM_KEY))].sort();
+  const sel   = document.getElementById('ai-sel-term');
+  sel.innerHTML = `<option value="">全部学期</option>`+terms.map(t=>`<option>${t}</option>`).join('');
+  aiState.term = '';
+}
+
+function aiRefreshPreview() {
+  aiState.group = document.getElementById('ai-sel-group').value;
+  aiState.term  = document.getElementById('ai-sel-term').value;
+  const key  = groupKey(aiState.lv);
+  const rows = getRows(aiState.lv).filter(r=>r[key]===aiState.group&&(!aiState.term||r.TERM_KEY===aiState.term));
+  if (!rows.length) { document.getElementById('ai-data-preview').innerHTML='<div class="empty">无数据</div>'; aiRow=null; return; }
+  // aggregate
+  const numKeys = Object.keys(rows[0]).filter(k=>!['XSM','ZYM','CLASS_NAME','TERM_KEY','dominant_mode_id','dominant_mode_name'].includes(k));
+  const agg = {};
+  numKeys.forEach(k=>{
+    const vals=rows.map(r=>parseFloat(r[k])).filter(v=>!isNaN(v));
+    agg[k]=vals.length?vals.reduce((a,b)=>a+b,0)/vals.length:null;
+  });
+  agg.n_records=rows.reduce((a,r)=>a+(parseInt(r.n_records)||0),0);
+  let maxP=0,domId=0;
+  for(let i=0;i<8;i++){const p=parseFloat(agg[`mode_${i}_pct`])||0;if(p>maxP){maxP=p;domId=i;}}
+  agg.dominant_mode_id=domId;
+  agg.dominant_mode_name=AppData.modes[domId]?.name||'—';
+  agg._group=aiState.group; agg._lv=aiState.lv;
+  aiRow=agg;
+
+  // render preview
+  const modeDist = AppData.modes.map(m=>`${m.name}:${((parseFloat(agg[`mode_${m.mode_id}_pct`])||0)*100).toFixed(1)}%`).join(' | ');
+  document.getElementById('ai-data-preview').innerHTML=`
+    <div style="font-size:12px;color:var(--text-2);line-height:2;word-break:break-all;">
+      <div><b>群体：</b>${aiState.group}（${aiState.lv==='college'?'学院':aiState.lv==='major'?'专业':'班级'}）</div>
+      <div><b>学期：</b>${aiState.term||'全部'}</div>
+      <div><b>记录数：</b>${agg.n_records}</div>
+      <div><b>主要模式：</b><span style="color:${MODE_COLORS[domId]}">${agg.dominant_mode_name}</span></div>
+      <div><b>模式分布：</b>${modeDist}</div>
+      <hr style="margin:8px 0"/>
+      <div><b>成绩均值：</b>${fmt.num(agg.kccj_mean_avg)}分 &nbsp;|&nbsp; <b>挂科率：</b>${fmt.pct(agg.kccj_fail_rate_avg)}</div>
+      <div><b>出勤率：</b>${fmt.pct(agg.att_present_rate_avg)} &nbsp;|&nbsp; <b>线上完成率：</b>${fmt.num(agg.online_bfb_avg,1)}%</div>
+    </div>
+  `;
+  buildPrompt();
+}
+
+function buildPrompt() {
+  if (!aiRow) return;
+  const angle  = document.getElementById('ai-angle').value;
+  const modes  = AppData.modes;
+  const modeDist = modes.map(m=>`  - ${m.name}（Mode ${m.mode_id}）：${((parseFloat(aiRow[`mode_${m.mode_id}_pct`])||0)*100).toFixed(1)}%`).join('\n');
+  const dimTxt = DIM_KEYS.map((k,i)=>`  - ${DIM_NAMES[i]}：${fmt.dim(aiRow[k+'_mean'])}`).join('\n');
+  const lvName = aiRow._lv==='college'?'学院':aiRow._lv==='major'?'专业':'班级';
+  const termStr = aiState.term||'全部学期';
+
+  const angleMap = {
+    overall: '请综合以上数据，为该群体生成一份学习行为画像分析报告（约 300 字）。\n重点说明：1) 该群体整体表现特征；2) 主要行为模式及其含义；3) 值得关注的维度；4) 对教学管理的参考建议。',
+    risk:    '请识别该群体的主要风险点，并给出针对性干预建议（约 300 字）。\n重点关注高风险比例、挂科率、出勤缺失等指标，结合模式分布分析潜在原因，提出 3～5 条具体可执行的干预措施。',
+    trend:   '请基于以下数据对该群体进行学期趋势分析（约 300 字）。\n结合模式分布和维度均值，说明该群体的变化趋势、是否出现风险信号，以及哪些方面在改善或恶化。',
+    compare: '请分析该群体相较于全体平均水平的异同（约 300 字）。\n重点说明哪些维度明显高于或低于均值（均值为 0），该群体的突出特征，以及与同类群体相比的相对位置。',
+  };
+
+  const prompt = `你是一位高校学生行为数据分析专家，请根据以下学生群体画像数据进行分析。
+
+【群体基本信息】
+- 群体名称：${aiRow._group}（${lvName}）
+- 分析学期：${termStr}
+- 记录数：${aiRow.n_records} 条（学生-学期维度）
+
+【行为模式分布】（基于 GMM 两层软聚类，共 8 种模式）
+${modeDist}
+
+【六维度均值】（相对全体均值，0 = 全体平均，正=高于均值，负=低于均值）
+${dimTxt}
+
+【关键原始指标均值】
+- 课程成绩均值：${fmt.num(aiRow.kccj_mean_avg)} 分
+- 挂科率：${fmt.pct(aiRow.kccj_fail_rate_avg)}
+- 绩点均值：${fmt.num(aiRow.jdcj_mean_avg,2)}
+- 出勤率：${fmt.pct(aiRow.att_present_rate_avg)}
+- 线上学习完成率：${fmt.num(aiRow.online_bfb_avg,1)}%
+- 作业提交数均值：${fmt.num(aiRow.hw_submit_cnt_avg,0)} 次
+- 参与活动数均值：${fmt.num(aiRow.att_event_cnt_avg,0)} 次
+- 体测综合分均值：${fmt.num(aiRow.fit3_zf_mean_avg,1)}
+
+【分析任务】
+${angleMap[angle]}
+
+要求：结构清晰，语言专业但易懂，面向高校教学管理人员，尽量引用具体数据支持观点。`;
+
+  document.getElementById('prompt-box').value = prompt;
+}
+
+async function callLLM() {
+  const url    = document.getElementById('cfg-url').value.trim();
+  const key    = document.getElementById('cfg-key').value.trim();
+  const selM   = document.getElementById('cfg-model').value;
+  const model  = selM==='custom' ? document.getElementById('cfg-model-custom').value.trim() : selM;
+  const prompt = document.getElementById('prompt-box').value;
+
+  if (!url || !key) {
+    setStatus('⚠️ 请先填写 API 地址和 Key', 'red'); return;
+  }
+  if (!prompt) { setStatus('⚠️ Prompt 为空', 'red'); return; }
+
+  const btn = document.getElementById('btn-call');
+  btn.disabled=true; btn.textContent='⏳ 请求中...';
+  setStatus('正在请求...', 'var(--text-3)');
+  document.getElementById('ai-response').textContent = '';
+  document.getElementById('ai-token-info').textContent = '';
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json', 'Authorization':`Bearer ${key}` },
+      body: JSON.stringify({
+        model,
+        messages: [{ role:'user', content: prompt }],
+        stream: true,
+        temperature: 0.7,
+        max_tokens: 1500
+      })
+    });
+
+    if (!res.ok) {
+      const err = await res.text();
+      setStatus(`❌ 请求失败 (${res.status}): ${err.slice(0,200)}`, '#DC2626');
+      return;
+    }
+
+    const reader   = res.body.getReader();
+    const decoder  = new TextDecoder();
+    const respEl   = document.getElementById('ai-response');
+    let   fullText = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value);
+      const lines = chunk.split('\n').filter(l=>l.startsWith('data: '));
+      for (const line of lines) {
+        const data = line.slice(6);
+        if (data==='[DONE]') break;
+        try {
+          const j     = JSON.parse(data);
+          const delta = j.choices?.[0]?.delta?.content || '';
+          fullText   += delta;
+          respEl.textContent = fullText;
+        } catch {}
+      }
+    }
+    setStatus('✅ 完成', '#059669');
+  } catch(e) {
+    setStatus(`❌ 网络错误：${e.message}`, '#DC2626');
+  } finally {
+    btn.disabled=false; btn.textContent='🚀 发送给大模型';
+  }
+}
+
+function setStatus(msg, color) {
+  const el = document.getElementById('ai-status');
+  el.textContent = msg;
+  el.style.color = color||'var(--text-3)';
+}
+
+function copyPrompt() {
+  navigator.clipboard.writeText(document.getElementById('prompt-box').value)
+    .then(()=>setStatus('✅ Prompt 已复制到剪贴板','#059669'));
+}
+
+function copyResult() {
+  navigator.clipboard.writeText(document.getElementById('ai-response').textContent)
+    .then(()=>setStatus('✅ 结果已复制','#059669'));
+}
+
+function clearResult() {
+  document.getElementById('ai-response').innerHTML = '<span style="color:var(--text-3)">模型回复将显示在此处...</span>';
+  document.getElementById('ai-status').textContent='';
+}
+</script>
+</body>
+</html>
