@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>学生个人报告</title>
+  <link rel="stylesheet" href="css/style.css"/>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5/papaparse.min.js"></script>
+</head>
+<body>
+<nav class="nav">
+  <a class="nav-brand" href="student.html"><em>学生</em>个人报告</a>
+  <div class="nav-links">
+    <button class="btn btn-outline btn-sm" id="btn-logout" onclick="logout()" style="display:none;">退出登录</button>
+  </div>
+</nav>
+
+<div class="page"><div class="container" style="max-width:1280px;">
+  <div id="app-error" hidden style="padding:20px;background:#FEF2F2;border:1px solid #FCA5A5;border-radius:12px;color:#DC2626;margin-bottom:20px;">
+    ⚠️ 数据加载失败，请通过 HTTP 服务器打开（如 <code>python -m http.server 8080</code>）。
+  </div>
+
+  <div class="card" id="login-card" style="margin-bottom:14px;">
+    <div class="card-hd flex-between">
+      <span class="card-title">输入学号生成报告</span>
+      <span style="font-size:12px;color:var(--text-3)" id="stu-meta">—</span>
+    </div>
+    <div class="card-bd">
+      <div class="gap-12" style="align-items:flex-end;">
+        <div style="flex:1; min-width:240px;">
+          <div class="f-label" style="margin-bottom:6px;">学号 / 账号（XH）</div>
+          <input id="inp-xh" placeholder="例如：200307700011" style="width:100%"/>
+        </div>
+        <button class="btn btn-primary" onclick="searchStudent()">生成报告</button>
+        <button class="btn btn-outline" onclick="clearStudent()">清空</button>
+      </div>
+      <div style="margin-top:10px;">
+        <div class="f-label" style="margin-bottom:6px;">示例账号（点击一键填入）</div>
+        <div class="gap-12" style="gap:8px;">
+          <button class="btn btn-outline btn-sm" onclick="fillXH('pjvyzxbj995')">Mode0：pjvyzxbj995</button>
+          <button class="btn btn-outline btn-sm" onclick="fillXH('pjvyzxbj998')">Mode1：pjvyzxbj998</button>
+          <button class="btn btn-outline btn-sm" onclick="fillXH('pjwrqxbj882')">Mode2：pjwrqxbj882</button>
+          <button class="btn btn-outline btn-sm" onclick="fillXH('pjwrqxbj951')">Mode3：pjwrqxbj951</button>
+          <button class="btn btn-outline btn-sm" onclick="fillXH('pjvyzxbj993')">Mode4：pjvyzxbj993</button>
+          <button class="btn btn-outline btn-sm" onclick="fillXH('pjwrqxbj918')">Mode5：pjwrqxbj918</button>
+          <button class="btn btn-outline btn-sm" onclick="fillXH('pjvyzvfj974')">Mode6：pjvyzvfj974</button>
+          <button class="btn btn-outline btn-sm" onclick="fillXH('200307700011')">Mode7：200307700011</button>
+        </div>
+      </div>
+      <div style="font-size:12px;color:var(--text-3);margin-top:10px;">
+        提示：当前报告基于“学生-学期”记录。若某些学期缺数据，该学期图表会显示为空或缺失。
+      </div>
+    </div>
+  </div>
+
+  <div id="empty" class="empty" style="display:none;">未找到该学号的记录，请检查输入是否正确。</div>
+
+  <div id="report" style="display:none;" class="panel-root">
+    <div class="panel-center">
+      <div class="board4">
+        <!-- 左 1/4：模式变化 + Top3 概率演变 -->
+        <div class="board-left vstack">
+          <div class="card" style="flex:1; min-height:0; display:flex; flex-direction:column;">
+            <div class="card-hd flex-between">
+              <span class="card-title">模式变化</span>
+              <button class="btn btn-outline btn-sm" onclick="openTermDetailModal()">查看明细</button>
+            </div>
+            <div class="card-bd" style="min-height:0; flex:1;">
+              <div id="chart-mode-timeline" class="chart-fill"></div>
+            </div>
+          </div>
+          <div class="card" style="flex:1; min-height:0; display:flex; flex-direction:column;">
+            <div class="card-hd flex-between">
+              <span class="card-title">模式概率演变（Top 3）</span>
+              <span style="font-size:12px;color:var(--text-3)">按学期</span>
+            </div>
+            <div class="card-bd" style="min-height:0; flex:1;">
+              <div id="chart-prob-top3" class="chart-fill"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 中 2/4：上 3/4 当前类型 + 更多可能性；下 1/4 六维度演变 -->
+        <div class="board-mid vstack">
+          <div class="card" style="flex:3; min-height:0; display:flex; flex-direction:column;">
+            <div class="card-hd flex-between">
+              <span class="card-title" id="stu-type-title">当前类型</span>
+              <div class="gap-12">
+                <select id="sel-stu-term" onchange="renderStudent()" style="max-width:220px;"></select>
+                <button class="btn btn-outline btn-sm" id="btn-toggle-primary" onclick="togglePrimary()">更多可能</button>
+              </div>
+            </div>
+            <div class="card-bd" style="min-height:0; flex:1;">
+              <!-- 默认：只显示最可能的类型（填满整个区域） -->
+              <div id="view-primary" style="height:100%; min-height:0;">
+                <div id="top1-card" class="card" style="height:100%; min-height:0; border:2px solid var(--border); box-shadow:var(--shadow); display:flex; flex-direction:column;">
+                  <div class="card-bd" style="padding:16px; min-height:0; flex:1; display:flex; flex-direction:column;">
+                    <div style="font-size:12px;color:var(--text-3);">最可能类型</div>
+                    <div id="top1-name" style="font-weight:900;font-size:28px;line-height:1.15;margin-top:8px;">—</div>
+                    <div id="top1-p" style="margin-top:12px;font-size:48px;font-weight:950;line-height:1;color:var(--accent);">—</div>
+                    <div id="top1-desc" style="margin-top:10px;font-size:13px;color:var(--text-2);line-height:1.75;">—</div>
+                    <div style="margin-top:12px; font-size:12px; color:var(--text-3);">证据与说明</div>
+                    <div id="stu-evidence" style="margin-top:6px; font-size:13px;color:var(--text-2);line-height:1.8;background:var(--bg);border:1px solid var(--border);border-radius:var(--r-sm);padding:12px; flex:1; min-height:0; overflow:auto;">—</div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 切换：只显示另外两个可能（占满整个区域） -->
+              <div id="view-alt" style="height:100%; min-height:0; display:none;">
+                <div class="vstack" style="height:100%; min-height:0;">
+                  <div class="card" style="flex:1; min-height:0; border:2px solid var(--border);">
+                    <div class="card-bd" style="padding:16px;">
+                      <div style="font-size:12px;color:var(--text-3);">第二可能</div>
+                      <div id="alt1-name" style="font-weight:900;font-size:20px;line-height:1.25;margin-top:8px;">—</div>
+                      <div id="alt1-p" style="margin-top:10px;font-size:38px;font-weight:950;line-height:1;">—</div>
+                      <div id="alt1-desc" style="margin-top:10px;font-size:13px;color:var(--text-2);line-height:1.7;">—</div>
+                    </div>
+                  </div>
+                  <div class="card" style="flex:1; min-height:0; border:2px solid var(--border);">
+                    <div class="card-bd" style="padding:16px;">
+                      <div style="font-size:12px;color:var(--text-3);">第三可能</div>
+                      <div id="alt2-name" style="font-weight:900;font-size:20px;line-height:1.25;margin-top:8px;">—</div>
+                      <div id="alt2-p" style="margin-top:10px;font-size:38px;font-weight:950;line-height:1;">—</div>
+                      <div id="alt2-desc" style="margin-top:10px;font-size:13px;color:var(--text-2);line-height:1.7;">—</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card" style="flex:1.5; min-height:0; display:flex; flex-direction:column;">
+            <div class="card-hd flex-between">
+              <span class="card-title">六维度能力演变</span>
+              <span style="font-size:12px;color:var(--text-3)">按学期</span>
+            </div>
+            <div class="card-bd" style="min-height:0; flex:1;">
+              <div id="chart-dim-evo" class="chart-fill"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 右 1/4：风险检测仪 / 雷达切换 + AI -->
+        <div class="board-right vstack">
+          <div class="card" style="flex:3; min-height:0; display:flex; flex-direction:column;">
+            <div class="card-hd flex-between">
+              <span class="card-title">六维度雷达</span>
+            </div>
+            <div class="card-bd" style="min-height:0; flex:1; display:flex; flex-direction:column;">
+              <div style="flex:1; min-height:0;">
+                <div id="chart-stu-radar" class="chart-fill"></div>
+              </div>
+            </div>
+          </div>
+          <div class="card" style="flex:5; min-height:0; display:flex; flex-direction:column;">
+            <div class="card-hd flex-between">
+              <span class="card-title">AI 对话</span>
+              <button class="btn btn-outline btn-sm" onclick="chatClear()">清空</button>
+            </div>
+            <div class="card-bd" style="min-height:0; flex:1;">
+              <div class="chat" style="height:100%;">
+                <div class="chat-log" id="chat-log"></div>
+                <div class="chat-input">
+                  <textarea id="chat-input" placeholder="例如：请给我下学期的改进建议（可执行、可量化）。"></textarea>
+                  <button class="btn btn-primary" onclick="chatSend()">发送</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div></div>
+
+<!-- 学期记录明细弹窗（由左上“模式变化”点击触发） -->
+<div class="overlay" id="modal-term-detail">
+  <div class="modal" style="max-width: 980px;">
+    <div class="modal-hd">
+      <div>
+        <h2 id="term-det-title">学期记录明细</h2>
+        <div id="term-det-sub" style="font-size:13px;color:var(--text-2);margin-top:4px;"></div>
+      </div>
+      <button class="modal-close" aria-label="关闭">✕</button>
+    </div>
+    <div class="modal-bd" style="padding:0;">
+      <div class="tbl-wrap" style="max-height: 70vh;">
+        <table>
+          <thead><tr>
+            <th>学期</th><th>mode</th><th>pmax</th><th>entropy</th>
+            <th>成绩</th><th>挂科率</th><th>出勤率</th><th>线上完成</th><th>奖学金</th>
+          </tr></thead>
+          <tbody id="tbl-terms"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="js/common.js"></script>
+<script>
+let allStuRows = [];
+let charts = {};
+let curXH = '';
+let curRows = [];
+let loggedIn = false;
+let selectedTermIndex = null;
+let typeView = 'primary'; // primary | alt
+
+function num(v){ const x = parseFloat(v); return Number.isFinite(x) ? x : null; }
+function mean(a){ const v=a.filter(x=>x!=null && !isNaN(x)); return v.length ? v.reduce((p,c)=>p+c,0)/v.length : null; }
+function esc(s){ return String(s??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;'); }
+
+function fillXH(xh){
+  document.getElementById('inp-xh').value = xh;
+  document.getElementById('inp-xh').focus();
+}
+window.fillXH = fillXH;
+
+function loadStudentCSV(){
+  return new Promise((res, rej)=>{
+    Papa.parse('./data/student_profiles.csv', {
+      download:true, header:true, skipEmptyLines:true,
+      complete: r => res(r.data),
+      error: e => rej(e)
+    });
+  });
+}
+
+function shortTerm(t){
+  if(!t) return '';
+  const s=String(t);
+  const m=s.match(/^(\\d{4})-(\\d{4})-([12])$/);
+  // 2020-2021-1 -> 0-1-1（更短，适合轴标签）
+  if(m) return `${m[1].slice(-1)}-${m[2].slice(-1)}-${m[3]}`;
+  const m2=s.match(/^(\\d{4})-([12])$/);
+  if(m2) return `${m2[1].slice(-1)}-${m2[2]}-${m2[2]}`;
+  return s;
+}
+
+function selectTermByIndex(idx){
+  if (idx == null) return;
+  const i = Number(idx);
+  if (!Number.isFinite(i) || i < 0 || i >= curRows.length) return;
+  const sel = document.getElementById('sel-stu-term');
+  sel.value = curRows[i].TERM_KEY;
+  renderStudent();
+}
+
+function top3FromRow(r){
+  const arr = [];
+  for(let i=0;i<8;i++){
+    const p = num(r[`p_mode_${i}`]);
+    if(p==null) continue;
+    arr.push({ mode:i, p });
+  }
+  arr.sort((a,b)=>b.p-a.p);
+  return arr.slice(0,3);
+}
+
+function modeMeta(id){
+  return (AppData.modes||[]).find(m=>Number(m.mode_id)===Number(id));
+}
+
+function buildStudentContext(){
+  const term = document.getElementById('sel-stu-term').value || '';
+  const row = term ? (curRows.find(r=>r.TERM_KEY===term) || curRows[curRows.length-1]) : null;
+  const base = row || curRows[curRows.length-1];
+  return {
+    page:'student.html',
+    xh: curXH,
+    term: term || 'ALL',
+    sex: base?.XB || '',
+    college: base?.XSM || '',
+    major: base?.ZYM || '',
+    class: base?.CLASS_NAME || '',
+    mode_id: base?.mode_id,
+    mode_name: base?.mode_name,
+    probs: Array.from({length:8},(_,i)=>({ mode:i, p: term ? num(base?.[`p_mode_${i}`]) : mean(curRows.map(r=>num(r[`p_mode_${i}`]))) })),
+    dims: Object.fromEntries(DIM_KEYS.map(k=>[k, term ? num(base?.[k]) : mean(curRows.map(r=>num(r[k]))) ])),
+    evidence: term ? (base?.mode_evidence || '') : '',
+  };
+}
+
+function chatAdd(role, text){
+  const log = document.getElementById('chat-log');
+  const who = role==='user' ? '你' : 'AI';
+  const cls = role==='user' ? 'user' : 'ai';
+  const div = document.createElement('div');
+  div.className = 'chat-msg';
+  div.innerHTML = `<span class="chat-role ${cls}">${who}：</span><span>${esc(text)}</span>`;
+  log.appendChild(div);
+  log.scrollTop = log.scrollHeight;
+  return div;
+}
+window.chatClear = ()=>{ document.getElementById('chat-log').innerHTML=''; };
+window.chatSend = async ()=>{
+  const ta = document.getElementById('chat-input');
+  const q = (ta.value||'').trim();
+  if(!q) return;
+  ta.value='';
+  chatAdd('user', q);
+  const aiDiv = chatAdd('ai', '（分析中...）');
+  const ctx = buildStudentContext();
+  try{
+    const res = await fetch('/api/ai', {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify({ task:'student_report', context: ctx, message:q })
+    });
+    const text = await res.text();
+    aiDiv.querySelector('span:last-child').textContent = res.ok ? text : `请求失败：${text.slice(0,200)}`;
+  }catch(e){
+    aiDiv.querySelector('span:last-child').textContent = `请求异常：${String(e?.message||e)}`;
+  }
+};
+
+function clearStudent(){
+  curXH=''; curRows=[];
+  document.getElementById('inp-xh').value='';
+  document.getElementById('report').style.display='none';
+  document.getElementById('empty').style.display='none';
+  document.getElementById('stu-meta').textContent='—';
+  const sel = document.getElementById('sel-stu-term');
+  sel.innerHTML = '';
+}
+
+function setLoggedIn(v){
+  loggedIn = !!v;
+  document.getElementById('login-card').style.display = loggedIn ? 'none' : '';
+  document.getElementById('btn-logout').style.display = loggedIn ? '' : 'none';
+}
+
+function logout(){
+  localStorage.removeItem('student_last_xh');
+  clearStudent();
+  setLoggedIn(false);
+  document.getElementById('inp-xh').focus();
+}
+window.logout = logout;
+
+function searchStudent(){
+  const xh = (document.getElementById('inp-xh').value||'').trim();
+  if(!xh) return;
+  curXH = xh;
+  curRows = allStuRows.filter(r=>String(r.XH)===xh).sort((a,b)=>String(a.TERM_KEY).localeCompare(String(b.TERM_KEY)));
+  if(!curRows.length){
+    document.getElementById('report').style.display='none';
+    document.getElementById('empty').style.display='';
+    document.getElementById('stu-meta').textContent = `学号：${xh}（未找到记录）`;
+    return;
+  }
+  localStorage.setItem('student_last_xh', xh);
+  document.getElementById('empty').style.display='none';
+  document.getElementById('report').style.display='';
+  setLoggedIn(true);
+  const first = curRows[0], last = curRows[curRows.length-1];
+  document.getElementById('stu-meta').textContent = `学号：${xh} · ${last.XB||'—'} · ${last.XSM||'—'} / ${last.ZYM||'—'}`;
+  const sel = document.getElementById('sel-stu-term');
+  const terms = curRows.map(r=>r.TERM_KEY);
+  sel.innerHTML = `<option value="">全部学期（综合）</option>` + terms.map(t=>`<option value="${t}">${t}</option>`).join('');
+  sel.value = last.TERM_KEY; // 默认仍显示当前（最后）学期
+  renderStudent();
+}
+
+function renderStudent(){
+  if(!curRows.length) return;
+  const term = document.getElementById('sel-stu-term').value;
+  const row = term ? (curRows.find(r=>r.TERM_KEY===term) || curRows[curRows.length-1]) : null;
+  const base = row || curRows[curRows.length-1];
+  const agg = !term ? {
+    p: Array.from({length:8},(_,i)=> mean(curRows.map(r=>num(r[`p_mode_${i}`]))) || 0),
+    dims: Object.fromEntries(DIM_KEYS.map(k=>[k, mean(curRows.map(r=>num(r[k]))) || 0])),
+  } : null;
+
+  const top = term
+    ? top3FromRow(base)
+    : Array.from({length:8},(_,i)=>({ mode:i, p: agg.p[i]||0 })).sort((a,b)=>b.p-a.p).slice(0,3);
+  const t1 = top[0], t2 = top[1], t3 = top[2];
+  const primary = t1 || t2 || t3;
+  const alt1 = t2 || null;
+  const alt2 = t3 || null;
+  const metaP = primary ? modeMeta(primary.mode) : null;
+  const metaAlt1 = alt1 ? modeMeta(alt1.mode) : null;
+  const metaAlt2 = alt2 ? modeMeta(alt2.mode) : null;
+  const cP = primary ? (MODE_COLORS[primary.mode]||'#3B82F6') : '#3B82F6';
+
+  // sel-stu-term 已在标题栏显示并驱动当前学期
+  document.getElementById('stu-type-title').textContent = '当前类型';
+  document.getElementById('top1-name').textContent = metaP?.name || (primary?`Mode ${primary.mode}`:'—');
+  document.getElementById('top1-p').innerHTML = primary ? `${(primary.p*100).toFixed(1)}<span style="font-size:16px;color:var(--text-3);font-weight:800;">%</span>` : '—';
+  document.getElementById('top1-p').style.color = cP;
+  document.getElementById('top1-desc').textContent = metaP?.description || '';
+  document.getElementById('alt1-name').textContent = metaAlt1?.name || (alt1?`Mode ${alt1.mode}`:'—');
+  document.getElementById('alt1-p').innerHTML = alt1 ? `${(alt1.p*100).toFixed(1)}<span style="font-size:14px;color:var(--text-3);font-weight:800;">%</span>` : '—';
+  document.getElementById('alt1-desc').textContent = metaAlt1?.description || '';
+  document.getElementById('alt2-name').textContent = metaAlt2?.name || (alt2?`Mode ${alt2.mode}`:'—');
+  document.getElementById('alt2-p').innerHTML = alt2 ? `${(alt2.p*100).toFixed(1)}<span style="font-size:14px;color:var(--text-3);font-weight:800;">%</span>` : '—';
+  document.getElementById('alt2-desc').textContent = metaAlt2?.description || '';
+
+  // Evidence
+  document.getElementById('stu-evidence').textContent =
+    term ? (base.mode_evidence || base.subtype_note || '—')
+         : '当前为“全部学期（综合）”口径：模式概率与六维度取各学期平均，用于整体画像概览。';
+
+  // 视图切换
+  document.getElementById('view-primary').style.display = (typeView==='primary') ? '' : 'none';
+  document.getElementById('view-alt').style.display = (typeView==='alt') ? '' : 'none';
+  const btn = document.getElementById('btn-toggle-primary');
+  if (btn) btn.textContent = (typeView==='primary') ? '更多可能' : '返回最可能';
+
+  renderStuRadar(term ? base : { ...base, ...agg.dims });
+  renderDimEvo();
+  renderModeTimeline();
+  renderProbTop3();
+  setTimeout(()=>Object.values(charts).forEach(c=>c?.resize()), 0);
+}
+
+function togglePrimary(){
+  typeView = (typeView==='primary') ? 'alt' : 'primary';
+  renderStudent();
+}
+window.togglePrimary = togglePrimary;
+
+function openTermDetailModal(idx){
+  const hasIdx = Number.isFinite(idx);
+  selectedTermIndex = hasIdx ? idx : null;
+  const r = hasIdx ? curRows[idx] : null;
+  document.getElementById('term-det-title').textContent = '学期记录明细';
+  document.getElementById('term-det-sub').textContent = `学号：${curXH} · 共 ${curRows.length} 学期记录`;
+  const tb = document.getElementById('tbl-terms');
+  tb.innerHTML = curRows.map((x,i)=>{
+    const online = num(x.online_bfb);
+    const dev = num(x.sch_amt_sum_term);
+    const bg = (hasIdx && i===idx) ? ' style="background:#EFF6FF;"' : '';
+    return `<tr${bg}>
+      <td>${esc(x.TERM_KEY)}</td>
+      <td style="font-weight:700">${esc(x.mode_name||'—')}</td>
+      <td>${(num(x.mode_pmax)||0).toFixed(3)}</td>
+      <td>${(num(x.mode_entropy)||0).toFixed(3)}</td>
+      <td>${num(x.kccj_mean)==null?'—':num(x.kccj_mean).toFixed(1)}</td>
+      <td>${num(x.kccj_fail_rate)==null?'—':(num(x.kccj_fail_rate)*100).toFixed(1)+'%'}</td>
+      <td>${num(x.att_present_rate)==null?'—':(num(x.att_present_rate)*100).toFixed(1)+'%'}</td>
+      <td>${online==null?'—':online.toFixed(1)+'%'}</td>
+      <td>${dev==null?'—':dev.toFixed(0)}</td>
+    </tr>`;
+  }).join('');
+  openModal('modal-term-detail');
+}
+window.openTermDetailModal = openTermDetailModal;
+
+function renderStuRadar(row){
+  if(!charts.radar) charts.radar = echarts.init(document.getElementById('chart-stu-radar'));
+  const vals = DIM_KEYS.map(k=>num(row[k])||0);
+  const maxAbs = Math.max(...vals.map(x=>Math.abs(x)), 1);
+  const lim = Math.max(1, Math.ceil(maxAbs*10)/10);
+  charts.radar.setOption({
+    tooltip:{ confine:false, appendToBody:true, className:'mode-chart-tooltip' },
+    legend:{ show:false },
+    radar:{ indicator: DIM_NAMES.map(n=>({ name:n, max:lim })), splitNumber:4, radius:'78%', center:['50%','54%'] },
+    series:[{ type:'radar', data:[{ value: vals, areaStyle:{ opacity:0.10 } }] }]
+  }, { notMerge:true });
+}
+
+function renderDimEvo(){
+  if(!charts.dimEvo) charts.dimEvo = echarts.init(document.getElementById('chart-dim-evo'));
+  const terms = curRows.map(r=>shortTerm(r.TERM_KEY));
+  const series = DIM_KEYS.map((k,i)=>({
+    name: DIM_NAMES[i],
+    type:'line',
+    smooth:true,
+    symbol:'circle',
+    symbolSize:5,
+    data: curRows.map(r=>{ const v=num(r[k]); return v==null?null:+v.toFixed(3); }),
+    itemStyle:{ color: MODE_COLORS[i] },
+    lineStyle:{ color: MODE_COLORS[i], width:2 }
+  }));
+  charts.dimEvo.setOption({
+    tooltip:{ trigger:'axis', confine:false, appendToBody:true, className:'mode-chart-tooltip' },
+    legend:{ type:'scroll', bottom:0, textStyle:{ fontSize:11 } },
+    grid:{ left:46, right:16, top:24, bottom:50, containLabel:false },
+    xAxis:{ type:'category', data:terms, axisLabel:{ fontSize:11 } },
+    yAxis:{ type:'value', axisLabel:{ fontSize:11 } },
+    series
+  }, { notMerge:true });
+
+  charts.dimEvo.off('click');
+  charts.dimEvo.on('click', p=>{
+    // 点击任一维度在某学期的点 -> 同步选择该学期
+    selectTermByIndex(p?.dataIndex);
+  });
+}
+
+function renderModeTimeline(){
+  if(!charts.modeTl) charts.modeTl = echarts.init(document.getElementById('chart-mode-timeline'));
+  const terms = curRows.map(r=>shortTerm(r.TERM_KEY));
+  charts.modeTl.setOption({
+    tooltip:{ confine:false, appendToBody:true, className:'mode-chart-tooltip',
+      position: (pt, params, dom, rect, size) => {
+        // 保证 tooltip 不跑到视窗外（appendToBody 时尤为重要）
+        const [x,y] = pt || [0,0];
+        const vw = (document.documentElement?.clientWidth || window.innerWidth || 0);
+        const vh = (document.documentElement?.clientHeight || window.innerHeight || 0);
+        const w = size?.contentSize?.[0] || 0;
+        const h = size?.contentSize?.[1] || 0;
+        const pad = 10;
+        let nx = x + 14, ny = y + 14;
+        if (nx + w + pad > vw) nx = x - w - 14;
+        if (ny + h + pad > vh) ny = y - h - 14;
+        nx = Math.max(pad, Math.min(vw - w - pad, nx));
+        ny = Math.max(pad, Math.min(vh - h - pad, ny));
+        return [nx, ny];
+      },
+      formatter: p => {
+        const idx = p?.dataIndex;
+        const r = (idx!=null) ? curRows[idx] : null;
+        const t = (idx!=null) ? terms[idx] : (p?.axisValue ?? '');
+        const mid = r ? (num(r.mode_id) ?? 0) : (typeof p?.data==='number' ? p.data : 0);
+        const name = r?.mode_name || '';
+        const desc = (AppData.modes || []).find(m=>Number(m.mode_id)===Number(mid))?.description || '';
+        const head = `${esc(t)}<br/>Mode ${mid}：${esc(name||'—')}`;
+        return desc ? `${head}<div style="margin-top:6px;color:#64748B;line-height:1.55;">${esc(desc)}</div>` : head;
+      } },
+    grid:{ left:26, right:18, top:12, bottom:34, containLabel:false },
+    xAxis:{ type:'category', data:terms, axisLabel:{ fontSize:11 } },
+    yAxis:{ type:'value', min:0, max:7, interval:1, axisLabel:{ fontSize:11 } },
+    series:[{
+      type:'line',
+      data: curRows.map(r=>num(r.mode_id)),
+      symbol:'circle',
+      symbolSize:9,
+      showSymbol:true,
+      lineStyle:{ width:2, color:'#3B82F6' },
+      itemStyle:{ color:'#3B82F6' }
+    }]
+  }, { notMerge:true });
+
+  charts.modeTl.off('click');
+  charts.modeTl.on('click', p=>{
+    // 点击学期点 -> 同步选择学期（页面其它模块随之更新）
+    selectTermByIndex(p?.dataIndex);
+  });
+}
+
+function renderProbTop3(){
+  if(!charts.prob) charts.prob = echarts.init(document.getElementById('chart-prob-top3'));
+  // 用“平均概率”选出Top3模式，再画随学期变化
+  const avg = Array.from({length:8},(_,i)=>({i, v: mean(curRows.map(r=>num(r[`p_mode_${i}`])) ) || 0 }));
+  avg.sort((a,b)=>b.v-a.v);
+  const top = avg.slice(0,3).map(x=>x.i);
+  const terms = curRows.map(r=>shortTerm(r.TERM_KEY));
+  const series = top.map(i=>({
+    name: `Mode ${i}`,
+    type:'line',
+    smooth:true,
+    symbol:'circle',
+    symbolSize:6,
+    data: curRows.map(r=>{ const v=num(r[`p_mode_${i}`]); return v==null?null:+(v*100).toFixed(2); }),
+    lineStyle:{ width:2.2, color: MODE_COLORS[i] },
+    itemStyle:{ color: MODE_COLORS[i] }
+  }));
+  charts.prob.setOption({
+    tooltip:{ trigger:'axis', confine:false, appendToBody:true, className:'mode-chart-tooltip',
+      formatter: ps => ps.map(p=>`${p.axisValue}<br/>${p.marker}${esc(p.seriesName)}：${p.value}%`).join('<br/>') },
+    legend:{ bottom:0, textStyle:{ fontSize:11 } },
+    grid:{ left:46, right:16, top:18, bottom:50, containLabel:false },
+    xAxis:{ type:'category', data:terms, axisLabel:{ fontSize:11 } },
+    yAxis:{ type:'value', axisLabel:{ fontSize:11, formatter:v=>v+'%' }, min:0, max:100 },
+    series
+  }, { notMerge:true });
+
+  charts.prob.off('click');
+  charts.prob.on('click', p=>{
+    // 点击某学期 -> 同步选择学期
+    selectTermByIndex(p?.dataIndex);
+  });
+}
+
+document.addEventListener('appReady', async ()=>{
+  try{
+    allStuRows = await loadStudentCSV();
+    // 自动进入“上次登录”的学生（进入页面默认展示当前学生）
+    const lastXH = localStorage.getItem('student_last_xh');
+    if (lastXH) {
+      document.getElementById('inp-xh').value = lastXH;
+      searchStudent();
+    } else {
+      setLoggedIn(false);
+      document.getElementById('inp-xh').focus();
+    }
+  }catch(e){
+    console.error(e);
+    document.getElementById('app-error')?.removeAttribute('hidden');
+  }
+});
+</script>
+</body>
+</html>
+
