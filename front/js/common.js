@@ -93,6 +93,37 @@ window.cleanNavText = function() {
   });
 };
 
+/* ===== AI text normalization (remove markdown artifacts) ===== */
+window.normalizeAIText = function(text) {
+  const s = String(text ?? '');
+  // 1) 统一换行
+  let out = s.replace(/\r\n/g, '\n');
+  // 2) 去掉常见 markdown 强调符号（避免出现 ** ）
+  out = out.replace(/\*\*/g, '');
+  // 有些模型会输出单个 * 作为强调，尽量去掉（保留像 3*5 这种）
+  out = out.replace(/(^|[^\d])\*(?!\d)(.*?)\*(?!\d)/g, '$1$2');
+  // 3) 去掉整行分割线（--- / ***）
+  out = out.replace(/^\s*[-*_]{3,}\s*$/gm, '');
+  // 4) 把行内分割线也转成段落
+  out = out.replace(/\s*---+\s*/g, '\n\n');
+
+  // 5) 把常见“段落标记/列表”补成换行（模型经常只用空格不换行）
+  // 标题/小节：xxx： 后面常跟正文，给它断段
+  out = out.replace(/(总览解读|趋势解读|风险总览解读|模式分析|当前选中模式解释|当前选中模式解读|当前模式解释|可执行建议|建议)\s*：/g, '\n\n$1：\n');
+  // 兼容 “一、二、三、四” 这种
+  out = out.replace(/([一二三四五六七八九十]+、)/g, '\n\n$1');
+  // 1. 2. 3. 这种编号列表
+  out = out.replace(/\s(?=\d+\.\s)/g, '\n');
+  // emoji/符号提示点常用于分段
+  out = out.replace(/\s(?=[👉✅📌➡️]+)/g, '\n');
+  // 句尾后面跟新段落关键词时也断一下
+  out = out.replace(/([。！？])\s+(?=[一二三四五六七八九十]+、|👉|✅|📌|\d+\.\s)/g, '$1\n');
+
+  // 4) 清理多余空行
+  out = out.replace(/\n{3,}/g, '\n\n').trim();
+  return out;
+};
+
 /* ===== Embedded AI (optional) ===== */
 window.AIEmbed = {
   async callOpenAICompatible({ url, key, model, messages, stream, onDelta }) {

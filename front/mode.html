@@ -3,9 +3,9 @@
 <head>
   <meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>学生行为画像系统 · 模式分析</title>
-  <link rel="stylesheet" href="css/style.css"/>
-  <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/papaparse@5/papaparse.min.js"></script>
+  <link rel="stylesheet" href="css/style.css?v=20260409"/>
+  <script src="vendor/echarts.min.js"></script>
+  <script src="vendor/papaparse.min.js"></script>
 </head>
 <body>
 <nav class="nav">
@@ -128,14 +128,23 @@
             </div>
             <div class="card" style="flex:1; min-height:0; display:flex; flex-direction:column;">
               <div class="card-hd flex-between">
-                <span class="card-title">AI 问答</span>
-                <button class="btn btn-outline btn-sm" onclick="chatClear()">清空</button>
+                <span class="card-title" style="white-space:nowrap;">AI 分析</span>
+                <div style="display:flex; flex-direction:column; align-items:flex-end; gap:6px; max-width:320px;">
+                  <div style="display:flex; gap:8px; justify-content:flex-end; width:100%;">
+                    <button class="btn btn-outline btn-sm" onclick="aiExplain()">页面讲解</button>
+                    <button class="btn btn-outline btn-sm" onclick="chatClear()">清空</button>
+                  </div>
+                  <div style="display:flex; gap:8px; justify-content:flex-end; width:100%;">
+                    <button class="btn btn-outline btn-sm" onclick="aiAnalyze()">页面分析</button>
+                    <button class="btn btn-outline btn-sm" onclick="aiSuggest()">建议</button>
+                  </div>
+                </div>
               </div>
               <div class="card-bd" style="min-height:0; flex:1;">
                 <div class="chat">
                   <div class="chat-log" id="chat-log"></div>
                   <div class="chat-input">
-                    <textarea id="chat-input" placeholder="例如：请用通俗的话解释该模式的特征，并给出可改进建议。"></textarea>
+                    <textarea id="chat-input" placeholder="这里可以进行深入提问"></textarea>
                     <button class="btn btn-primary" onclick="chatSend()">发送</button>
                   </div>
                 </div>
@@ -172,7 +181,7 @@
   </div>
 </div>
 
-<script src="js/common.js"></script>
+<script src="js/common.js?v=20260409"></script>
 <script>
 let studentRows = [];
 let charts = {};
@@ -449,7 +458,7 @@ function renderDimRadar(rows){
       data: series,
       areaStyle:{ opacity:0.08 }
     }]
-  });
+  }, { notMerge:true });
 }
 
 function renderDimBox(rows){
@@ -483,12 +492,15 @@ function renderDimBox(rows){
         fontSize:11,
         interval: 0,        // 强制显示全部类目
         hideOverlap: false, // 不自动隐藏
-        rotate: 0
+        rotate: 24,
+        margin: 12,
+        width: 68,
+        overflow: 'truncate'
       }
     },
     yAxis:{ type:'value', axisLabel:{fontSize:11} },
     series
-  });
+  }, { notMerge:true });
 }
 
 function renderSubtype(rows){
@@ -863,12 +875,13 @@ function buildAIContext(){
   };
 }
 
-window.chatSend = async function(){
+window.chatSend = async function(qOverride, opts){
   const ta = document.getElementById('chat-input');
-  const q = (ta.value||'').trim();
+  const q = (qOverride != null ? String(qOverride) : (ta.value||'')).trim();
   if(!q) return;
   ta.value = '';
-  chatAdd('user', q);
+  const silent = !!opts?.silent;
+  if (!silent) chatAdd('user', q);
 
   const ctx = buildAIContext();
   chatAdd('ai', '（分析中...）');
@@ -876,29 +889,69 @@ window.chatSend = async function(){
   const last = log.lastElementChild;
 
   try{
-    const url = './api/ai';
-    const res = await fetch(url, {
+    const res = await fetch('/api/ai', {
       method:'POST',
       headers:{ 'Content-Type':'application/json' },
       body: JSON.stringify({
-        messages: [
-          { role:'system', content:'你是高校学生行为画像分析助手。回答要简洁、通俗、可操作。' },
-          { role:'user', content:`上下文：${JSON.stringify(ctx)}\n\n问题：${q}` }
-        ]
+        task: 'mode_chat',
+        context: ctx,
+        message: q
       })
     });
-    if(!res.ok){
-      const t = await res.text();
-      last.querySelector('span:last-child').textContent = `请求失败：${t.slice(0,200)}`;
-      return;
-    }
-    const j = await res.json().catch(()=>null);
-    const text = j?.text || j?.answer || j?.choices?.[0]?.message?.content || '';
-    last.querySelector('span:last-child').textContent = text || '（后端未返回文本）';
+    const text = await res.text();
+    if(!res.ok) throw new Error(text || `${res.status} ${res.statusText}`);
+    const out = text || '（后端未返回文本）';
+    last.querySelector('span:last-child').textContent = (window.normalizeAIText ? window.normalizeAIText(out) : out);
   }catch(e){
-    last.querySelector('span:last-child').textContent = `请求异常：${e?.message||e}`;
+    last.querySelector('span:last-child').textContent = `AI 后端尚未接入或请求失败：${String(e?.message||e)}`;
   }
   log.scrollTop = log.scrollHeight;
+}
+
+window.aiExplain = function(){
+  const term = document.getElementById('sel-term')?.value || '';
+  const compare = document.getElementById('sel-compare')?.value || '';
+  const tip = [
+    '请做“页面解读”，帮助新用户快速看懂本页（纯中文纯文本，不要Markdown符号/标题/列表符号）。',
+    `当前口径：Mode ${state.mode}；学期=${term||'全部学期'}；对比=${compare||'不对比'}`,
+    '请按换行分段输出（不需要建议，除非用户追问）：',
+    '第一段：这页在回答什么问题（模式分析的目的）。',
+    '第二段：左上“模式迁移”怎么看（格子含义、颜色含义、鼠标悬停能看到什么）。',
+    '第三段：左下“仅子类/学院+专业”怎么看（两种视图分别在说明什么）。',
+    '第四段：中上“六维度均值”怎么看（每条线代表什么，怎么判断强项/短板，学期选择对结果的影响）。',
+    '第五段：中下“该模式占比随学期变化”怎么看（上升/下降意味着什么）。',
+    '第六段：右上“雷达/箱线”怎么看（雷达 vs 箱线各自回答什么问题；对比全体开启后如何解读差异）。',
+    '第七段：给出一句话总结：这一页最关键的1个结论应怎么看出来。'
+  ].join('\n');
+  // “开始分析”不展示提示词，只展示 AI 回答
+  chatSend(tip, { silent:true });
+}
+
+window.aiAnalyze = function(){
+  const term = document.getElementById('sel-term')?.value || '';
+  const compare = document.getElementById('sel-compare')?.value || '';
+  const tip = [
+    '请做“页面分析”，基于本页当前口径给出结论与依据（纯中文纯文本，不要Markdown符号/标题/列表符号）。',
+    `当前口径：Mode ${state.mode}；学期=${term||'全部学期'}；对比=${compare||'不对比'}`,
+    '请按换行分段输出（不需要建议，除非用户追问）：',
+    '第一段：一句话结论（该模式此口径下最显著的特征）。',
+    '第二段：用本页图表各给1条证据支撑（迁移/六维度/子类或来源/占比趋势中任选3条，合计不超过4句）。',
+    '第三段：如果开启对比全体，指出差异最大的1个维度并解释该差异在图上如何看出来（1-2句）。'
+  ].join('\n');
+  chatSend(tip, { silent:true });
+}
+
+window.aiSuggest = function(){
+  const term = document.getElementById('sel-term')?.value || '';
+  const compare = document.getElementById('sel-compare')?.value || '';
+  const tip = [
+    '请基于本页信息给出“建议”。输出必须分为两部分：',
+    '理由：用本页可见信息解释为什么要这样做（3条以内，每条1句）。',
+    '建议：给出可执行动作（3条以内，每条1-2句，尽量可量化）。',
+    '要求：纯中文纯文本，不要Markdown符号/标题/列表符号，不要复述提示词。',
+    `当前口径：Mode ${state.mode}；学期=${term||'全部学期'}；对比=${compare||'不对比'}`,
+  ].join('\n');
+  chatSend(tip, { silent:true });
 }
 
 document.addEventListener('appReady', async ()=>{

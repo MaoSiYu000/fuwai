@@ -192,6 +192,11 @@ body.allow-scroll .container{ height:auto; overflow: visible; display:block; }
 .chat-role{ font-weight:700; margin-right:6px; }
 .chat-role.user{ color: var(--accent); }
 .chat-role.ai{ color: #059669; }
+/* AI/用户消息内容按换行显示（不要挤成一行） */
+.chat-msg span:last-child{
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 .chat-input{
   margin-top: 10px;
   display:flex;

@@ -3,9 +3,9 @@
 <head>
   <meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>学生行为画像系统 · 趋势分析</title>
-  <link rel="stylesheet" href="css/style.css"/>
-  <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/papaparse@5/papaparse.min.js"></script>
+  <link rel="stylesheet" href="css/style.css?v=20260409"/>
+  <script src="vendor/echarts.min.js"></script>
+  <script src="vendor/papaparse.min.js"></script>
 </head>
 <body>
 <nav class="nav">
@@ -73,17 +73,29 @@
           </div>
           <div style="flex:1.5; min-height:0; border-top:1px solid var(--border); display:flex; flex-direction:column;">
             <div class="card-hd">
-              <span class="card-title">AI 分析</span>
+              <div class="flex-between" style="width:100%;">
+                <span class="card-title" style="white-space:nowrap;">AI 分析</span>
+                <div style="display:flex; flex-direction:column; align-items:flex-end; gap:6px; max-width:320px;">
+                  <div style="display:flex; gap:8px; justify-content:flex-end; width:100%;">
+                    <button class="btn btn-outline btn-sm" onclick="aiExplain()">页面讲解</button>
+                    <button class="btn btn-outline btn-sm" onclick="chatClear()">清空</button>
+                  </div>
+                  <div style="display:flex; gap:8px; justify-content:flex-end; width:100%;">
+                    <button class="btn btn-outline btn-sm" onclick="aiAnalyze()">页面分析</button>
+                    <button class="btn btn-outline btn-sm" onclick="aiSuggest()">建议</button>
+                  </div>
+                </div>
+              </div>
             </div>
             <div class="card-bd chat" style="padding-top:10px;">
               <div class="chat-log" id="chat-log">
                 <div class="chat-msg">
                   <span class="chat-role ai">AI</span>
-                  <span>你可以提问趋势变化的原因、风险信号、以及建议。我会把群体、学期序列、结构与指标曲线摘要作为上下文发送到后端。</span>
+                  <span>你可以继续深入提问，我会结合当前群体与时间序列，解释趋势图传达的含义。</span>
                 </div>
               </div>
               <div class="chat-input">
-                <textarea id="chat-q" placeholder="例如：哪些学期风险信号更明显？可能原因是什么？给出3条建议。"></textarea>
+                <textarea id="chat-q" placeholder="这里可以进行深入提问"></textarea>
                 <button class="btn btn-primary" id="chat-send" onclick="chatSend()">发送</button>
               </div>
             </div>
@@ -94,7 +106,7 @@
   </div>
 </div></div>
 
-<script src="js/common.js"></script>
+<script src="js/common.js?v=20260409"></script>
 <script>
 let state = { lv:'college', group:'' };
 let charts = {};
@@ -219,11 +231,8 @@ function renderDimsTrend() {
   });
 }
 
-window.chatSend = async function(){
-  const qEl = document.getElementById('chat-q');
-  const q = (qEl.value||'').trim();
-  if (!q) return;
-  qEl.value = '';
+async function chatSendInternal(q, opts){
+  const silent = !!opts?.silent;
   const log = document.getElementById('chat-log');
   const append = (role, text) => {
     const div = document.createElement('div');
@@ -234,7 +243,7 @@ window.chatSend = async function(){
     log.scrollTop = log.scrollHeight;
     return div;
   };
-  append('user', q);
+  if (!silent) append('user', q);
   const aiDiv = append('ai', '思考中…');
 
   const metric = document.getElementById('sel-metric').value;
@@ -264,14 +273,80 @@ window.chatSend = async function(){
     });
     const text = await res.text();
     if (!res.ok) throw new Error(text || `${res.status} ${res.statusText}`);
-    aiDiv.querySelector('span:last-child').textContent = text;
+    aiDiv.querySelector('span:last-child').textContent = (window.normalizeAIText ? window.normalizeAIText(text) : text);
   }catch(e){
     aiDiv.querySelector('span:last-child').textContent =
       `AI 后端尚未接入或请求失败：${String(e?.message||e)}\n（后续把 /api/ai 接到你们的大模型代理即可）`;
   }finally{
     btn.disabled = false;
   }
+}
+
+window.chatClear = function(){
+  const log = document.getElementById('chat-log');
+  if (!log) return;
+  log.innerHTML = `
+    <div class="chat-msg">
+      <span class="chat-role ai">AI</span>
+      <span>你可以继续深入提问，我会结合当前群体与时间序列，解释趋势图传达的含义。</span>
+    </div>
+  `;
 };
+
+window.chatSend = async function(){
+  const qEl = document.getElementById('chat-q');
+  const q = (qEl.value||'').trim();
+  if (!q) return;
+  qEl.value = '';
+  return chatSendInternal(q, { silent:false });
+};
+
+window.aiExplain = function(){
+  const metric = document.getElementById('sel-metric')?.value || '';
+  const rows = getGroupRows();
+  const terms = rows.map(r=>r.TERM_KEY);
+  const ask = [
+    `请做“页面解读”，帮助新用户快速看懂本页（纯中文纯文本，不要Markdown符号/标题/列表符号）。`,
+    `当前口径：${state.lv} / ${state.group}；指标=${metric}；学期点数=${terms.length}`,
+    `请按换行分段输出（不需要建议，除非用户追问）：`,
+    `第一段：这页在回答什么问题（趋势分析的目的）。`,
+    `第二段：左侧上方“指标趋势线”怎么看（纵轴口径、波动/拐点含义）。`,
+    `第三段：左侧下方“六维度均值趋势”怎么看（每条线代表什么，如何对照指标）。`,
+    `第四段：右侧“模式结构堆叠面积”怎么看（面积=占比，结构变化怎么看）。`,
+    `第五段：本页常见误读/注意事项（2条以内）。`,
+    `第六段：一句话总结：用户应先看哪个图来抓住重点。`,
+  ].join('\n');
+  chatSendInternal(ask, { silent:true });
+}
+
+window.aiAnalyze = function(){
+  const metric = document.getElementById('sel-metric')?.value || '';
+  const rows = getGroupRows();
+  const terms = rows.map(r=>r.TERM_KEY);
+  const ask = [
+    '请做“页面分析”，基于本页当前口径给出结论与依据（纯中文纯文本，不要Markdown符号/标题/列表符号）。',
+    `当前口径：${state.lv} / ${state.group}；指标=${metric}；学期点数=${terms.length}`,
+    '请按换行分段输出（不需要建议，除非用户追问）：',
+    '第一段：一句话结论（这条趋势最重要的变化是什么）。',
+    '第二段：指出1-2个关键学期（拐点/异常）并说明它们在图上如何看出来。',
+    '第三段：结构视角补充（堆叠面积里哪几个模式在上升/下降，1-2句）。'
+  ].join('\n');
+  chatSendInternal(ask, { silent:true });
+}
+
+window.aiSuggest = function(){
+  const metric = document.getElementById('sel-metric')?.value || '';
+  const rows = getGroupRows();
+  const terms = rows.map(r=>r.TERM_KEY);
+  const ask = [
+    '请基于本页信息给出“建议”。输出必须分为两部分：',
+    '理由：用本页可见信息解释为什么要这样做（3条以内，每条1句）。',
+    '建议：给出可执行动作（3条以内，每条1-2句，尽量可量化）。',
+    '要求：纯中文纯文本，不要Markdown符号/标题/列表符号，不要复述提示词。',
+    `当前口径：${state.lv} / ${state.group}；指标=${metric}；学期点数=${terms.length}`,
+  ].join('\n');
+  chatSendInternal(ask, { silent:true });
+}
 
 window.addEventListener('resize', ()=>{ charts.stack?.resize(); charts.line?.resize(); charts.dims?.resize(); });
 </script>

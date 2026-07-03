@@ -3,9 +3,9 @@
 <head>
   <meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>学生行为画像系统 · 风险预警</title>
-  <link rel="stylesheet" href="css/style.css"/>
-  <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/papaparse@5/papaparse.min.js"></script>
+  <link rel="stylesheet" href="css/style.css?v=20260409"/>
+  <script src="vendor/echarts.min.js"></script>
+  <script src="vendor/papaparse.min.js"></script>
 </head>
 <body>
 <nav class="nav">
@@ -88,21 +88,30 @@
         <!-- 右：AI对话 -->
         <div class="center-card board-right">
           <div class="card-hd">
-            <span class="card-title">AI 分析</span>
+            <div class="flex-between" style="width:100%;">
+              <span class="card-title" style="white-space:nowrap;">AI 分析</span>
+              <div style="display:flex; flex-direction:column; align-items:flex-end; gap:6px; max-width:320px;">
+                <div style="display:flex; gap:8px; justify-content:flex-end; width:100%;">
+                  <button class="btn btn-outline btn-sm" onclick="aiExplain()">页面讲解</button>
+                  <button class="btn btn-outline btn-sm" onclick="chatClear()">清空</button>
+                </div>
+                <div style="display:flex; gap:8px; justify-content:flex-end; width:100%;">
+                  <button class="btn btn-outline btn-sm" onclick="aiAnalyze()">页面分析</button>
+                  <button class="btn btn-outline btn-sm" onclick="aiSuggest()">建议</button>
+                </div>
+              </div>
+            </div>
           </div>
           <div class="card-bd chat">
             <div class="chat-log" id="chat-log">
               <div class="chat-msg">
                 <span class="chat-role ai">AI</span>
-                <span>你可以提问风险结构、可能原因与干预建议。我会把当前筛选口径、排行榜摘要、散点分布摘要作为上下文发送到后端。</span>
+                <span>你可以继续深入提问，我会结合当前筛选口径，解释排行榜与散点图传达的含义。</span>
               </div>
             </div>
             <div class="chat-input">
-              <textarea id="chat-q" placeholder="例如：这些高风险群体的共性是什么？优先干预哪些？"></textarea>
+              <textarea id="chat-q" placeholder="这里可以进行深入提问"></textarea>
               <button class="btn btn-primary" id="chat-send" onclick="chatSend()">发送</button>
-            </div>
-            <div style="font-size:12px;color:var(--text-3);margin-top:8px;">
-              说明：此处默认请求后端接口 <code>/api/ai</code>（需你们后续接入大模型代理）。
             </div>
           </div>
         </div>
@@ -132,7 +141,7 @@
   </div>
 </div>
 
-<script src="js/common.js"></script>
+<script src="js/common.js?v=20260409"></script>
 <script>
 let state = { lv:'college', term:'', sortKey:'risk', sortDir:'desc' };
 let allRows = [];
@@ -263,11 +272,8 @@ function renderScatter() {
   });
 }
 
-window.chatSend = async function(){
-  const qEl = document.getElementById('chat-q');
-  const q = (qEl.value||'').trim();
-  if (!q) return;
-  qEl.value = '';
+async function chatSendInternal(q, opts){
+  const silent = !!opts?.silent;
   const log = document.getElementById('chat-log');
   const append = (role, text) => {
     const div = document.createElement('div');
@@ -278,7 +284,7 @@ window.chatSend = async function(){
     log.scrollTop = log.scrollHeight;
     return div;
   };
-  append('user', q);
+  if (!silent) append('user', q);
   const aiDiv = append('ai', '思考中…');
 
   const term = document.getElementById('sel-term').value || '';
@@ -310,14 +316,80 @@ window.chatSend = async function(){
     });
     const text = await res.text();
     if (!res.ok) throw new Error(text || `${res.status} ${res.statusText}`);
-    aiDiv.querySelector('span:last-child').textContent = text;
+    aiDiv.querySelector('span:last-child').textContent = (window.normalizeAIText ? window.normalizeAIText(text) : text);
   }catch(e){
     aiDiv.querySelector('span:last-child').textContent =
       `AI 后端尚未接入或请求失败：${String(e?.message||e)}\n（后续把 /api/ai 接到你们的大模型代理即可）`;
   }finally{
     btn.disabled = false;
   }
+}
+
+window.chatClear = function(){
+  const log = document.getElementById('chat-log');
+  if (!log) return;
+  log.innerHTML = `
+    <div class="chat-msg">
+      <span class="chat-role ai">AI</span>
+      <span>你可以继续深入提问，我会结合当前筛选口径，解释排行榜与散点图传达的含义。</span>
+    </div>
+  `;
 };
+
+window.chatSend = async function(){
+  const qEl = document.getElementById('chat-q');
+  const q = (qEl.value||'').trim();
+  if (!q) return;
+  qEl.value = '';
+  return chatSendInternal(q, { silent:false });
+};
+
+window.aiExplain = function(){
+  const term = document.getElementById('sel-term')?.value || '';
+  const sortSel = document.getElementById('sort-sel')?.value || '';
+  const search = (document.getElementById('search-input')?.value || '').trim();
+  const head = '请做“页面解读”，帮助用户看懂本页信息（纯中文纯文本，不要Markdown符号/标题/列表符号）。';
+  const ask = [
+    head,
+    `当前口径：维度=${state.lv}；学期=${term||'全部学期'}；排序=${sortSel||'—'}${search ? `；搜索=${search}` : ''}`,
+    '请按换行分段输出（务必简短清晰，不需要建议，除非用户追问）：',
+    '第一段：这页在回答什么问题（风险预警的核心含义）。',
+    '第二段：左侧“风险排行榜”怎么看（排序代表什么、点“查看”能看到什么）。',
+    '第三段：中间“散点图”怎么看（横轴/纵轴分别代表什么，四象限各自含义）。',
+    '第四段：结合当前口径，给出1-2个最值得注意的现象（不要展开原因猜测）。',
+    '第五段：一句话总结：用户应该先看哪里来抓住重点。'
+  ].join('\n');
+  chatSendInternal(ask, { silent:true });
+}
+
+window.aiAnalyze = function(){
+  const term = document.getElementById('sel-term')?.value || '';
+  const sortSel = document.getElementById('sort-sel')?.value || '';
+  const search = (document.getElementById('search-input')?.value || '').trim();
+  const ask = [
+    '请做“页面分析”，基于本页当前口径给出结论与依据（纯中文纯文本，不要Markdown符号/标题/列表符号）。',
+    `当前口径：维度=${state.lv}；学期=${term||'全部学期'}；排序=${sortSel||'—'}${search ? `；搜索=${search}` : ''}`,
+    '请按换行分段输出（不需要建议，除非用户追问）：',
+    '第一段：一句话结论（这页最重要的风险信号是什么）。',
+    '第二段：用“排行榜+散点图”各给1条证据支撑（共2句）。',
+    '第三段：指出你最关注的1类群体位置（例如高风险&低成绩象限），并说明为什么。'
+  ].join('\n');
+  chatSendInternal(ask, { silent:true });
+}
+
+window.aiSuggest = function(){
+  const term = document.getElementById('sel-term')?.value || '';
+  const sortSel = document.getElementById('sort-sel')?.value || '';
+  const search = (document.getElementById('search-input')?.value || '').trim();
+  const ask = [
+    '请基于本页信息给出“建议”。输出必须分为两部分：',
+    '理由：用本页可见信息解释为什么要这样做（3条以内，每条1句）。',
+    '建议：给出可执行动作（3条以内，每条1-2句，尽量可量化）。',
+    '要求：纯中文纯文本，不要Markdown符号/标题/列表符号，不要复述提示词。',
+    `当前口径：维度=${state.lv}；学期=${term||'全部学期'}；排序=${sortSel||'—'}${search ? `；搜索=${search}` : ''}`,
+  ].join('\n');
+  chatSendInternal(ask, { silent:true });
+}
 
 window.showDetail = function(row) {
   if (typeof row==='string') row=JSON.parse(row);

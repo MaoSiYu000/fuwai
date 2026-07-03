@@ -3,9 +3,9 @@
 <head>
   <meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>学生个人报告</title>
-  <link rel="stylesheet" href="css/style.css"/>
-  <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/papaparse@5/papaparse.min.js"></script>
+  <link rel="stylesheet" href="css/style.css?v=20260409"/>
+  <script src="vendor/echarts.min.js"></script>
+  <script src="vendor/papaparse.min.js"></script>
 </head>
 <body>
 <nav class="nav">
@@ -154,14 +154,23 @@
           </div>
           <div class="card" style="flex:5; min-height:0; display:flex; flex-direction:column;">
             <div class="card-hd flex-between">
-              <span class="card-title">AI 对话</span>
-              <button class="btn btn-outline btn-sm" onclick="chatClear()">清空</button>
+              <span class="card-title" style="white-space:nowrap;">AI 对话</span>
+              <div style="display:flex; flex-direction:column; align-items:flex-end; gap:6px; max-width:320px;">
+                <div style="display:flex; gap:8px; justify-content:flex-end; width:100%;">
+                  <button class="btn btn-outline btn-sm" onclick="aiExplain()">页面讲解</button>
+                  <button class="btn btn-outline btn-sm" onclick="chatClear()">清空</button>
+                </div>
+                <div style="display:flex; gap:8px; justify-content:flex-end; width:100%;">
+                  <button class="btn btn-outline btn-sm" onclick="aiAnalyze()">页面分析</button>
+                  <button class="btn btn-outline btn-sm" onclick="aiSuggest()">建议</button>
+                </div>
+              </div>
             </div>
             <div class="card-bd" style="min-height:0; flex:1;">
               <div class="chat" style="height:100%;">
                 <div class="chat-log" id="chat-log"></div>
                 <div class="chat-input">
-                  <textarea id="chat-input" placeholder="例如：请给我下学期的改进建议（可执行、可量化）。"></textarea>
+                  <textarea id="chat-input" placeholder="这里可以进行深入提问"></textarea>
                   <button class="btn btn-primary" onclick="chatSend()">发送</button>
                 </div>
               </div>
@@ -197,7 +206,7 @@
   </div>
 </div>
 
-<script src="js/common.js"></script>
+<script src="js/common.js?v=20260409"></script>
 <script>
 let allStuRows = [];
 let charts = {};
@@ -294,12 +303,52 @@ function chatAdd(role, text){
   return div;
 }
 window.chatClear = ()=>{ document.getElementById('chat-log').innerHTML=''; };
-window.chatSend = async ()=>{
+
+window.aiExplain = function(){
+  const ask = [
+    '请做“页面解读”，帮助新用户快速看懂本页学生个人报告（纯中文纯文本，不要Markdown符号/标题/列表符号）。',
+    '请按换行分段输出（不需要建议，除非用户追问）：',
+    '第一段：这页在回答什么问题（个人画像的核心目的）。',
+    '第二段：左侧“模式变化/概率演变”怎么看（点学期会联动什么）。',
+    '第三段：中间“当前类型/更多可能”怎么看（Top1 与 Top2/3 的含义）。',
+    '第四段：下方“六维度能力演变”怎么看（线上六条线如何判断强弱变化）。',
+    '第五段：右上“六维度雷达”怎么看（每一维代表什么）。',
+    '第六段：一句话总结：用户应先看哪里抓住重点。'
+  ].join('\\n');
+  chatSend(ask, { silent:true });
+}
+
+window.aiAnalyze = function(){
+  const term = document.getElementById('sel-stu-term')?.value || '';
+  const ask = [
+    '请做“页面分析”，基于本页当前学期口径给出结论与依据（纯中文纯文本，不要Markdown符号/标题/列表符号）。',
+    `当前口径：学期=${term||'全部学期（综合）'}`,
+    '请按换行分段输出（不需要建议，除非用户追问）：',
+    '第一段：一句话结论（该学生当前最核心的类型特征）。',
+    '第二段：用本页图表各给1条证据支撑（模式/概率/六维度/雷达中任选3条，合计不超过4句）。',
+    '第三段：指出一个需要进一步确认的点（例如概率不确定或某维度波动大），并说明在图上怎么看出来。'
+  ].join('\\n');
+  chatSend(ask, { silent:true });
+}
+
+window.aiSuggest = function(){
+  const term = document.getElementById('sel-stu-term')?.value || '';
+  const ask = [
+    '请基于本页信息给出“建议”。输出必须分为两部分：',
+    '理由：用本页可见信息解释为什么要这样做（3条以内，每条1句）。',
+    '建议：给出可执行动作（3条以内，每条1-2句，尽量可量化）。',
+    '要求：纯中文纯文本，不要Markdown符号/标题/列表符号，不要复述提示词。',
+    `当前口径：学期=${term||'全部学期（综合）'}`,
+  ].join('\\n');
+  chatSend(ask, { silent:true });
+}
+window.chatSend = async (qOverride, opts)=>{
   const ta = document.getElementById('chat-input');
-  const q = (ta.value||'').trim();
+  const q = (qOverride != null ? String(qOverride) : (ta.value||'')).trim();
   if(!q) return;
   ta.value='';
-  chatAdd('user', q);
+  const silent = !!opts?.silent;
+  if (!silent) chatAdd('user', q);
   const aiDiv = chatAdd('ai', '（分析中...）');
   const ctx = buildStudentContext();
   try{
@@ -309,7 +358,8 @@ window.chatSend = async ()=>{
       body: JSON.stringify({ task:'student_report', context: ctx, message:q })
     });
     const text = await res.text();
-    aiDiv.querySelector('span:last-child').textContent = res.ok ? text : `请求失败：${text.slice(0,200)}`;
+    const out = res.ok ? text : `请求失败：${text.slice(0,200)}`;
+    aiDiv.querySelector('span:last-child').textContent = (window.normalizeAIText ? window.normalizeAIText(out) : out);
   }catch(e){
     aiDiv.querySelector('span:last-child').textContent = `请求异常：${String(e?.message||e)}`;
   }

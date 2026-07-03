@@ -3,9 +3,9 @@
 <head>
   <meta charset="UTF-8" /><meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>学生行为画像系统 · 总览</title>
-  <link rel="stylesheet" href="css/style.css"/>
-  <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/papaparse@5/papaparse.min.js"></script>
+  <link rel="stylesheet" href="css/style.css?v=20260409"/>
+  <script src="vendor/echarts.min.js"></script>
+  <script src="vendor/papaparse.min.js"></script>
 </head>
 <body>
 
@@ -116,17 +116,29 @@
               </div>
               <div id="right-ai-wrap" style="flex:1; min-height:0; border-top:1px solid var(--border); display:flex; flex-direction:column;">
                 <div class="card-hd">
-                  <span class="card-title">AI 分析</span>
+                  <div class="flex-between" style="width:100%;">
+                    <span class="card-title" style="white-space:nowrap;">AI 分析</span>
+                    <div style="display:flex; flex-direction:column; align-items:flex-end; gap:6px; max-width:320px;">
+                      <div style="display:flex; gap:8px; justify-content:flex-end; width:100%;">
+                        <button class="btn btn-outline btn-sm" onclick="aiExplain()">页面讲解</button>
+                        <button class="btn btn-outline btn-sm" onclick="chatClear()">清空</button>
+                      </div>
+                      <div style="display:flex; gap:8px; justify-content:flex-end; width:100%;">
+                        <button class="btn btn-outline btn-sm" onclick="aiAnalyze()">页面分析</button>
+                        <button class="btn btn-outline btn-sm" onclick="aiSuggest()">建议</button>
+                      </div>
+                    </div>
+                  </div>
                 </div>
                 <div class="card-bd chat" style="padding-top:10px;">
                   <div class="chat-log" id="chat-log">
                     <div class="chat-msg">
                       <span class="chat-role ai">AI</span>
-                      <span>选择一个模式后，你可以直接提问（这里会把该模式的六维度画像、占比、描述作为上下文传给后端）。</span>
+                      <span>你可以继续深入提问，我会结合当前页面的筛选口径与选中模式进行解释。</span>
                     </div>
                   </div>
                   <div class="chat-input">
-                    <textarea id="chat-q" placeholder="例如：这个模式的学生可能存在哪些风险？给出3条可执行建议。"></textarea>
+                    <textarea id="chat-q" placeholder="这里可以进行深入提问"></textarea>
                     <button class="btn btn-primary" id="chat-send" onclick="chatSend()">发送</button>
                   </div>
                 </div>
@@ -170,7 +182,7 @@
   </div>
 </div>
 
-<script src="js/common.js"></script>
+<script src="js/common.js?v=20260409"></script>
 <script>
 document.addEventListener('appReady', init);
 
@@ -561,11 +573,8 @@ function updateCenterTitle(){
   document.getElementById('center-title').textContent = '20,014 条行为模式分析';
 }
 
-window.chatSend = async function(){
-  const qEl = document.getElementById('chat-q');
-  const q = (qEl.value||'').trim();
-  if (!q) return;
-  qEl.value = '';
+async function chatSendInternal(q, opts){
+  const silent = !!opts?.silent;
   const log = document.getElementById('chat-log');
   const append = (role, text) => {
     const div = document.createElement('div');
@@ -576,11 +585,22 @@ window.chatSend = async function(){
     log.scrollTop = log.scrollHeight;
     return div;
   };
-  append('user', q);
+  if (!silent) append('user', q);
   const aiDiv = append('ai', '思考中…');
 
   const payload = {
-    task: 'mode_explain_chat',
+    task: 'overview_chat',
+    view: {
+      scope: window.__scope || 'overall',
+      group: (window.__scope === 'group') ? {
+        lv: window.__groupState?.lv || '',
+        name: window.__groupState?.group || '',
+        term: window.__groupState?.term || '',
+        n_records: window.__groupState?.agg?.n_records ?? null,
+        dim_means: window.__groupState?.agg ? Object.fromEntries(DIM_KEYS.map(k=>[k, parseFloat(window.__groupState.agg[k+'_mean'])||0])) : null,
+        mode_pct: window.__groupState?.agg ? Object.fromEntries(Array.from({length:8},(_,i)=>[i, parseFloat(window.__groupState.agg[`mode_${i}_pct`])||0])) : null
+      } : null
+    },
     selected_mode: window.__selectedMode ? {
       mode_id: window.__selectedMode.mode_id,
       name: window.__selectedMode.name,
@@ -602,14 +622,93 @@ window.chatSend = async function(){
     });
     const text = await res.text();
     if (!res.ok) throw new Error(text || `${res.status} ${res.statusText}`);
-    aiDiv.querySelector('span:last-child').textContent = text;
+    aiDiv.querySelector('span:last-child').textContent = (window.normalizeAIText ? window.normalizeAIText(text) : text);
   }catch(e){
     aiDiv.querySelector('span:last-child').textContent =
       `AI 后端尚未接入或请求失败：${String(e?.message||e)}\n（后续把 /api/ai 接到你们的大模型代理即可）`;
   }finally{
     btn.disabled = false;
   }
+}
+
+window.chatClear = function(){
+  const log = document.getElementById('chat-log');
+  if (!log) return;
+  log.innerHTML = `
+    <div class="chat-msg">
+      <span class="chat-role ai">AI</span>
+      <span>你可以继续深入提问，我会结合当前页面的筛选口径与选中模式进行解释。</span>
+    </div>
+  `;
 };
+
+window.chatSend = async function(){
+  const qEl = document.getElementById('chat-q');
+  const q = (qEl.value||'').trim();
+  if (!q) return;
+  qEl.value = '';
+  return chatSendInternal(q, { silent:false });
+};
+
+window.aiExplain = function(){
+  const scope = window.__scope || 'overall';
+  const g = window.__groupState || {};
+  const m = window.__selectedMode;
+  const scopeLine = scope === 'group'
+    ? `口径：群体视角；维度=${g.lv||'—'}；群体=${g.group||'—'}；学期=${g.term||'全部学期'}`
+    : '口径：总体视角';
+  const ask = [
+    '请做“页面解读”，帮助新用户快速看懂本页（纯中文纯文本，不要Markdown符号/标题/列表符号）。',
+    scopeLine,
+    m ? `当前模式：Mode ${m.mode_id} ${m.name}` : '当前模式：未指定（请以占比最高模式为重点）',
+    '请按换行分段输出（不需要建议，除非用户追问）：',
+    '第一段：这页在回答什么问题（总览的核心目的）。',
+    '第二段：中间“分布图”怎么看（扇形代表什么、点扇形会发生什么）。',
+    '第三段：左侧“模式详情”怎么看（六维度条形的正负含义、占比/样本数含义）。',
+    '第四段：右上“画像雷达”怎么看（覆盖含义、查看详情能看到什么）。',
+    '第五段：如果切到“群体视角”，筛选条与口径怎么理解（维度/群体/学期）。',
+    '第六段：给出一句话总结：用户应该先看哪里来抓住重点。'
+  ].join('\n');
+  // “开始分析”不展示提示词，只展示 AI 回答
+  chatSendInternal(ask, { silent:true });
+}
+
+window.aiAnalyze = function(){
+  const scope = window.__scope || 'overall';
+  const g = window.__groupState || {};
+  const m = window.__selectedMode;
+  const scopeLine = scope === 'group'
+    ? `口径：群体视角；维度=${g.lv||'—'}；群体=${g.group||'—'}；学期=${g.term||'全部学期'}`
+    : '口径：总体视角';
+  const ask = [
+    '请做“页面分析”，基于本页当前口径与当前选中模式，给出结论与依据（纯中文纯文本，不要Markdown符号/标题/列表符号）。',
+    scopeLine,
+    m ? `当前模式：Mode ${m.mode_id} ${m.name}` : '当前模式：未指定（请以占比最高模式为重点）',
+    '请按换行分段输出（不需要建议，除非用户追问）：',
+    '第一段：一句话结论（当前结构最重要的信息）。',
+    '第二段：用本页能看到的证据支撑（最多3句，分别对应分布/六维度/画像）。',
+    '第三段：如果是群体视角，指出该群体与总体相比最突出的差异（1-2句）。'
+  ].join('\n');
+  chatSendInternal(ask, { silent:true });
+}
+
+window.aiSuggest = function(){
+  const scope = window.__scope || 'overall';
+  const g = window.__groupState || {};
+  const m = window.__selectedMode;
+  const scopeLine = scope === 'group'
+    ? `口径：群体视角；维度=${g.lv||'—'}；群体=${g.group||'—'}；学期=${g.term||'全部学期'}`
+    : '口径：总体视角';
+  const ask = [
+    '请基于本页信息给出“建议”。输出必须分为两部分：',
+    '理由：用本页可见信息解释为什么要这样做（3条以内，每条1句）。',
+    '建议：给出可执行动作（3条以内，每条1-2句，尽量可量化）。',
+    '要求：纯中文纯文本，不要Markdown符号/标题/列表符号，不要复述提示词。',
+    scopeLine,
+    m ? `当前模式：Mode ${m.mode_id} ${m.name}` : '当前模式：未指定（请以占比最高模式为重点）',
+  ].join('\n');
+  chatSendInternal(ask, { silent:true });
+}
 </script>
 </body>
 </html>
